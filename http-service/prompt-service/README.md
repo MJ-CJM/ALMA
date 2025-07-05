@@ -1,357 +1,156 @@
-# Prompt 服务
+# Prompt Service 模块
 
-## 概述
-Prompt 服务负责生成结构化的提示词模板，结合 RAG 模块的检索结果，为大语言模型提供上下文增强的提示词。支持问答和学习计划生成两种场景。
+## 📋 项目概述
 
-## 功能特性
-- 智能问答提示词生成
-- 个性化学习计划提示词构建
-- 统一的模板管理系统
-- 与 RAG 模块的无缝集成
-- 为 Dify 工作流提供标准化接口
-- 支持直接调用和 HTTP 调用两种模式
+Prompt Service 是一个面向大模型应用的标准化 Prompt 构建与服务模块。它通过调用 rag-module 的知识检索能力，将用户问题、学习目标等与知识库内容结合，自动生成结构化、高质量的 Prompt，支持问答、学习计划、总结、解释等多种场景，并可灵活扩展。
 
-## 架构设计
+---
 
-### 文件结构
+## 🏗️ 系统架构
+
+```
+Prompt Service 架构
+├── prompt_server.py      # FastAPI HTTP 服务，统一对外接口
+├── prompt_builder.py     # Prompt 构建工具，模板与上下文注入
+├── rag-module            # 通过 HTTP API 调用知识检索能力
+└── Dify/外部系统         # 通过 HTTP 调用 prompt_server
+```
+
+- **解耦设计**：Prompt Service 只通过 HTTP API 调用 rag-module，不直接操作底层向量库。
+- **模板驱动**：所有 Prompt 通过模板和上下文拼接生成，便于扩展和维护。
+- **标准接口**：所有服务接口均为 HTTP RESTful，便于 Dify 等平台集成。
+
+---
+
+## 🔧 技术实现
+
+- **FastAPI**：高性能异步 Web 框架，提供标准化 HTTP 服务。
+- **PromptBuilder**：核心工具类，支持多类型 Prompt 模板构建、上下文注入、知识检索。
+- **RAG API 调用**：通过 HTTP 请求 rag-module 的 `/search` 接口获取知识片段。
+- **模板扩展**：支持动态添加新类型 Prompt 模板，满足未来扩展需求。
+- **异常处理**：所有接口均有参数校验和异常处理，保证服务健壮性。
+
+---
+
+## 📚 API 接口说明
+
+### 1. 健康检查
+- **GET `/health`**
+- 检查服务健康状态
+
+### 2. 问答 Prompt 构建
+- **POST `/prompt/qa`**
+- 根据用户问题和知识检索结果，生成结构化问答 Prompt
+- **请求示例**：
+```json
+{
+  "query": "什么是 FixAgent？",
+  "top_k": 3,
+  "filename": "FixAgent.pdf"
+}
+```
+- **返回示例**：
+```json
+{
+  "prompt": "...",
+  "prompt_type": "qa",
+  "query": "什么是 FixAgent？",
+  "search_results_count": 3
+}
+```
+
+### 3. 学习计划 Prompt 构建
+- **POST `/prompt/learning-plan`**
+- 根据目标、时间范围和知识检索结果，生成学习计划 Prompt
+- **请求示例**：
+```json
+{
+  "goal": "掌握大模型原理",
+  "time_range": "2024-07-01~2024-08-01",
+  "learning_background": "有一定机器学习基础",
+  "top_k": 5
+}
+```
+
+### 4. 总结 Prompt 构建
+- **POST `/prompt/summary`**
+- 根据内容和总结要求，结合知识检索结果，生成总结 Prompt
+- **请求示例**：
+```json
+{
+  "content": "大模型的训练流程...",
+  "summary_requirements": "请总结核心流程和关键技术",
+  "top_k": 3
+}
+```
+
+### 5. 解释 Prompt 构建
+- **POST `/prompt/explanation`**
+- 对某个概念或问题进行详细解释
+- **请求示例**：
+```json
+{
+  "concept": "RAG",
+  "explanation_requirements": "请详细解释 RAG 的原理和应用场景",
+  "top_k": 3
+}
+```
+
+### 6. 自定义 Prompt 构建
+- **POST `/prompt/custom`**
+- 支持自定义 Prompt 类型和上下文，适合扩展新类型
+- **请求示例**：
+```json
+{
+  "prompt_type": "qa",
+  "query": "什么是向量数据库？",
+  "top_k": 2,
+  "filename": "FixAgent.pdf",
+  "additional_context": {"extra_info": "可选的上下文"}
+}
+```
+
+### 7. 添加新模板
+- **POST `/template/add`**
+- 动态添加新的 Prompt 模板
+- **请求示例**：
+```json
+{
+  "prompt_type": "my_custom_type",
+  "template": "自定义模板内容 {query} {search_results}"
+}
+```
+
+### 8. 获取所有支持的 Prompt 类型
+- **GET `/types`**
+- 获取当前支持的所有 Prompt 类型
+
+### 9. 检查 RAG 服务健康
+- **GET `/rag/health`**
+- 检查 rag-module 服务是否可用
+
+---
+
+## 💡 使用建议
+
+- 推荐通过 `/docs` 访问自动生成的 Swagger API 文档，获取所有接口的详细参数和返回示例。
+- 可根据业务需求扩展自定义 Prompt 类型和模板。
+- 适合 Dify、工作流平台等作为 HTTP 节点直接集成。
+
+---
+
+## 📁 目录结构
+
 ```
 prompt-service/
-├── prompt_server.py   # FastAPI HTTP 服务器
-├── requirements.txt   # 依赖包
-└── README.md         # 说明文档
+├── prompt_server.py      # FastAPI HTTP 服务
+├── prompt_builder.py     # Prompt 构建工具
+├── requirements.txt      # 依赖包列表
+└── README.md             # 项目文档
 ```
 
-### 技术栈
-- **FastAPI**: Web 框架
-- **Requests**: HTTP 客户端
-- **Pydantic**: 数据验证
-- **RAG Service**: 文档检索服务
-
-### 代码逻辑
-
-#### 1. 问答流程
-```python
-用户问题 → RAG检索 → 上下文整合 → 问答Prompt → 返回给大模型
-```
-
-#### 2. 学习计划生成流程
-```python
-学习目标+时间 → RAG检索 → 知识整合 → 计划Prompt → 返回给大模型
-```
-
-#### 3. 核心组件
-
-**PromptTemplate 类**：
-- 管理各种提示词模板
-- 支持动态参数注入
-- 模板类型：qa（问答）、study_plan（学习计划）
-
-**RAG 集成模式**：
-- `query_rag_service_direct()`: 直接调用 RAG 服务类
-- `query_rag_service_http()`: 通过 HTTP API 调用
-
-**API 接口层**：
-- 标准接口：面向通用场景
-- Dify 接口：面向工作流集成
-
-## 安装和运行
-
-### 1. 安装依赖
-```bash
-pip install -r requirements.txt
-```
-
-### 2. 确保 RAG 服务运行
-RAG 服务需要在 `http://localhost:5000` 运行
-
-### 3. 启动服务
-```bash
-python prompt_server.py
-```
-服务将在 `http://localhost:5001` 启动
-
-## API 接口
-
-### 1. 问答接口
-```http
-POST /qa
-Content-Type: application/json
-
-{
-  "question": "什么是人工智能？",
-  "limit": 5
-}
-```
-
-响应示例：
-```json
-{
-  "prompt": "基于以下相关文档内容，请回答用户的问题...",
-  "context_sources": [
-    {
-      "filename": "ai_book.pdf",
-      "text": "人工智能是...",
-      "score": 0.85
-    }
-  ]
-}
-```
-
-### 2. 学习计划生成接口
-```http
-POST /study-plan
-Content-Type: application/json
-
-{
-  "goal": "学习机器学习",
-  "timeframe": "3个月",
-  "limit": 10
-}
-```
-
-响应示例：
-```json
-{
-  "prompt": "基于以下知识内容，为用户制定学习计划...",
-  "learning_materials": [
-    {
-      "filename": "ml_guide.pdf",
-      "text": "机器学习基础...",
-      "score": 0.90
-    }
-  ]
-}
-```
-
-### 3. Dify 专用接口
-
-#### 问答接口
-```http
-POST /dify-qa
-Content-Type: application/json
-
-{
-  "question": "深度学习的原理是什么？"
-}
-```
-
-响应示例：
-```json
-{
-  "success": true,
-  "prompt": "生成的提示词内容",
-  "context_count": 5,
-  "timestamp": "2024-01-01T12:00:00"
-}
-```
-
-#### 学习计划接口
-```http
-POST /dify-study-plan
-Content-Type: application/json
-
-{
-  "goal": "成为数据科学家",
-  "timeframe": "6个月"
-}
-```
-
-### 4. 自定义模板接口
-```http
-POST /prompt-template
-Content-Type: application/json
-
-{
-  "type": "qa",
-  "parameters": {
-    "context": "相关文档内容",
-    "question": "用户问题"
-  }
-}
-```
-
-### 5. 工具接口
-
-#### 获取可用模板
-```http
-GET /templates
-```
-
-#### 健康检查
-```http
-GET /health
-```
-
-## 测试方法
-
-### 1. 基本功能测试
-```bash
-# 健康检查
-curl http://localhost:5001/health
-
-# 问答测试
-curl -X POST http://localhost:5001/qa \
-  -H "Content-Type: application/json" \
-  -d '{"question": "什么是机器学习？", "limit": 3}'
-
-# 学习计划测试
-curl -X POST http://localhost:5001/study-plan \
-  -H "Content-Type: application/json" \
-  -d '{"goal": "学习Python", "timeframe": "2个月"}'
-```
-
-### 2. Dify 接口测试
-```bash
-# Dify 问答测试
-curl -X POST http://localhost:5001/dify-qa \
-  -H "Content-Type: application/json" \
-  -d '{"question": "深度学习是什么？"}'
-
-# Dify 学习计划测试
-curl -X POST http://localhost:5001/dify-study-plan \
-  -H "Content-Type: application/json" \
-  -d '{"goal": "AI工程师", "timeframe": "1年"}'
-```
-
-### 3. 使用 Python 测试
-```python
-import requests
-
-# 问答测试
-response = requests.post(
-    "http://localhost:5001/qa",
-    json={
-        "question": "什么是自然语言处理？",
-        "limit": 5
-    }
-)
-print("Prompt:", response.json()["prompt"])
-
-# 学习计划测试
-response = requests.post(
-    "http://localhost:5001/study-plan",
-    json={
-        "goal": "掌握深度学习",
-        "timeframe": "4个月"
-    }
-)
-print("Study Plan Prompt:", response.json()["prompt"])
-```
-
-### 4. 集成测试
-```python
-# 完整流程测试：问题 → RAG检索 → Prompt生成 → 大模型调用
-import requests
-
-def test_qa_pipeline():
-    # 1. 调用问答接口获取 Prompt
-    prompt_response = requests.post(
-        "http://localhost:5001/dify-qa",
-        json={"question": "什么是神经网络？"}
-    )
-    
-    if prompt_response.json()["success"]:
-        prompt = prompt_response.json()["prompt"]
-        print("Generated Prompt:", prompt)
-        
-        # 2. 将 Prompt 发送给大模型（示例）
-        # llm_response = call_llm_api(prompt)
-        # print("LLM Response:", llm_response)
-
-test_qa_pipeline()
-```
-
-### 5. 性能测试
-```bash
-# 并发请求测试
-ab -n 50 -c 5 -T 'application/json' \
-  -p qa_data.json \
-  http://localhost:5001/dify-qa
-
-# 创建测试数据文件
-echo '{"question": "什么是人工智能？"}' > qa_data.json
-```
-
-## 提示词模板
-
-### 1. 问答模板 (qa)
-```
-基于以下相关文档内容，请回答用户的问题。如果文档内容不足以回答问题，请说明需要更多信息。
-
-相关文档：
-{context}
-
-用户问题：{question}
-
-请提供详细、准确的回答：
-```
-
-### 2. 学习计划模板 (study_plan)
-```
-基于以下知识内容，为用户制定学习计划。
-
-相关知识内容：
-{context}
-
-学习目标：{goal}
-时间范围：{timeframe}
-
-请制定一个详细的学习计划，包括：
-1. 学习阶段划分
-2. 每个阶段的具体内容
-3. 建议的学习方法
-4. 时间安排
-5. 评估方式
-
-学习计划：
-```
-
-## 配置说明
-
-### RAG 服务配置
-- 默认 RAG 服务地址：`http://localhost:5000`
-- 可通过环境变量 `RAG_SERVICE_URL` 修改
-
-### 调用模式配置
-- 支持直接调用和HTTP调用两种模式
-- 默认使用直接调用模式（性能更好）
-- HTTP模式用于分布式部署
-
-## 与 Dify 集成
-
-### 1. 在 Dify 中配置 HTTP 节点
-- URL: `http://localhost:5001/dify-qa`
-- 方法: POST
-- 请求体: `{"question": "{{question}}"}`
-
-### 2. 获取生成的 Prompt
-```json
-{
-  "success": true,
-  "prompt": "{{生成的提示词}}",
-  "context_count": 5,
-  "timestamp": "2024-01-01T12:00:00"
-}
-```
-
-### 3. 将 Prompt 传递给 LLM 节点
-使用 `{{dify-qa.prompt}}` 作为 LLM 的输入
-
-## 故障排除
-
-### 常见问题
-1. **RAG 服务连接失败**：检查 RAG 服务是否正常运行
-2. **上下文为空**：确认 RAG 服务中有相关文档
-3. **模板渲染错误**：检查参数是否完整
-
-### 日志查看
-服务运行时输出详细日志：
-- RAG 服务调用状态
-- 模板渲染过程
-- 错误详细信息
-
-## 扩展功能
-- 支持更多提示词模板类型
-- 添加模板版本管理
-- 集成更多外部知识源
-- 支持多语言提示词生成
+---
+
+**版本**: 1.0.0  
+**更新时间**: 2025-07-05  
+**维护者**: Prompt Service 开发团队

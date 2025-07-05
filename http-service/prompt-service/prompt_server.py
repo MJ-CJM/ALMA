@@ -1,307 +1,316 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
-import requests
-from datetime import datetime
 import uvicorn
-import sys
-import os
+from prompt_builder import PromptBuilder, PromptType
 
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'rag-module'))
-from rag_service import RAGService
+app = FastAPI(title="Prompt Service", description="Prompt 构建服务")
 
-app = FastAPI(title="Prompt Service", description="问答和学习计划生成服务")
+# 初始化 Prompt 构建器
+prompt_builder = PromptBuilder()
 
-RAG_SERVICE_URL = "http://localhost:5000"
-rag_service = RAGService()
+# 请求模型
+class QAPromptRequest(BaseModel):
+    query: str
+    top_k: Optional[int] = 5
+    filename: Optional[str] = None
 
-class QuestionRequest(BaseModel):
-    question: str
-    limit: Optional[int] = 5
-
-class StudyPlanRequest(BaseModel):
+class LearningPlanRequest(BaseModel):
     goal: str
-    timeframe: str
-    limit: Optional[int] = 10
+    time_range: str
+    learning_background: Optional[str] = ""
+    top_k: Optional[int] = 5
 
-class PromptTemplateRequest(BaseModel):
-    type: str
-    parameters: Dict[str, Any]
+class SummaryRequest(BaseModel):
+    content: str
+    summary_requirements: str
+    top_k: Optional[int] = 5
 
-class DifyQARequest(BaseModel):
-    question: str
+class ExplanationRequest(BaseModel):
+    concept: str
+    explanation_requirements: str
+    top_k: Optional[int] = 5
 
-class DifyStudyPlanRequest(BaseModel):
-    goal: str
-    timeframe: str
+class CustomPromptRequest(BaseModel):
+    prompt_type: str
+    query: str
+    top_k: Optional[int] = 5
+    filename: Optional[str] = None
+    additional_context: Optional[Dict[str, Any]] = None
 
-class ContextSource(BaseModel):
-    filename: str
-    text: str
-    score: float
+class TemplateRequest(BaseModel):
+    prompt_type: str
+    template: str
 
-class QuestionResponse(BaseModel):
+# 响应模型
+class PromptResponse(BaseModel):
     prompt: str
-    context_sources: List[ContextSource]
+    prompt_type: str
+    query: str
+    search_results_count: int
 
-class StudyPlanResponse(BaseModel):
-    prompt: str
-    learning_materials: List[ContextSource]
+class TemplateResponse(BaseModel):
+    prompt_type: str
+    template: str
+    message: str
 
-class DifyResponse(BaseModel):
-    success: bool
-    prompt: Optional[str] = None
-    error: Optional[str] = None
-    context_count: Optional[int] = None
-    materials_count: Optional[int] = None
-    timestamp: str
+class AvailableTypesResponse(BaseModel):
+    available_types: List[str]
+    total_count: int
 
-class PromptTemplate:
-    def __init__(self):
-        self.templates = {
-            "qa": """基于以下相关文档内容，请回答用户的问题。如果文档内容不足以回答问题，请说明需要更多信息。
-
-相关文档：
-{context}
-
-用户问题：{question}
-
-请提供详细、准确的回答：""",
-            
-            "study_plan": """基于以下知识内容，为用户制定学习计划。
-
-相关知识内容：
-{context}
-
-学习目标：{goal}
-时间范围：{timeframe}
-
-请制定一个详细的学习计划，包括：
-1. 学习阶段划分
-2. 每个阶段的具体内容
-3. 建议的学习方法
-4. 时间安排
-5. 评估方式
-
-学习计划："""
-        }
-    
-    def build_prompt(self, template_type: str, **kwargs) -> str:
-        if template_type not in self.templates:
-            raise ValueError(f"Unknown template type: {template_type}")
-        
-        template = self.templates[template_type]
-        return template.format(**kwargs)
-
-prompt_template = PromptTemplate()
-
-def query_rag_service_http(query: str, limit: int = 5) -> List[Dict[str, Any]]:
-    """通过HTTP调用RAG服务"""
-    try:
-        response = requests.post(
-            f"{RAG_SERVICE_URL}/search",
-            json={"query": query, "limit": limit},
-            timeout=30
-        )
-        response.raise_for_status()
-        return response.json().get("results", [])
-    except requests.RequestException as e:
-        print(f"Error querying RAG service via HTTP: {e}")
-        return []
-
-def query_rag_service_direct(query: str, limit: int = 5) -> List[Dict[str, Any]]:
-    """直接调用RAG服务"""
-    try:
-        return rag_service.search(query, limit)
-    except Exception as e:
-        print(f"Error querying RAG service directly: {e}")
-        return []
-
-@app.post("/qa", response_model=QuestionResponse)
-async def question_answer(request: QuestionRequest):
-    """问答接口"""
-    if not request.question:
-        raise HTTPException(status_code=400, detail="Question is required")
-    
-    rag_results = query_rag_service_direct(request.question, request.limit)
-    
-    if not rag_results:
-        raise HTTPException(status_code=404, detail="No relevant documents found")
-    
-    context = "\n\n".join([
-        f"文档: {result['filename']}\n内容: {result['text']}"
-        for result in rag_results
-    ])
-    
-    prompt = prompt_template.build_prompt(
-        "qa",
-        context=context,
-        question=request.question
-    )
-    
-    context_sources = [
-        ContextSource(
-            filename=result['filename'],
-            text=result['text'][:200] + "..." if len(result['text']) > 200 else result['text'],
-            score=result['score']
-        )
-        for result in rag_results
-    ]
-    
-    return QuestionResponse(prompt=prompt, context_sources=context_sources)
-
-@app.post("/study-plan", response_model=StudyPlanResponse)
-async def generate_study_plan(request: StudyPlanRequest):
-    """学习计划生成接口"""
-    if not request.goal or not request.timeframe:
-        raise HTTPException(status_code=400, detail="Goal and timeframe are required")
-    
-    rag_results = query_rag_service_direct(request.goal, request.limit)
-    
-    if not rag_results:
-        raise HTTPException(status_code=404, detail="No relevant learning materials found")
-    
-    context = "\n\n".join([
-        f"知识点: {result['filename']}\n内容: {result['text']}"
-        for result in rag_results
-    ])
-    
-    prompt = prompt_template.build_prompt(
-        "study_plan",
-        context=context,
-        goal=request.goal,
-        timeframe=request.timeframe
-    )
-    
-    learning_materials = [
-        ContextSource(
-            filename=result['filename'],
-            text=result['text'][:200] + "..." if len(result['text']) > 200 else result['text'],
-            score=result['score']
-        )
-        for result in rag_results
-    ]
-    
-    return StudyPlanResponse(prompt=prompt, learning_materials=learning_materials)
-
-@app.post("/prompt-template")
-async def build_custom_prompt(request: PromptTemplateRequest):
-    """自定义Prompt模板构建"""
-    if not request.type:
-        raise HTTPException(status_code=400, detail="Template type is required")
-    
-    try:
-        prompt = prompt_template.build_prompt(request.type, **request.parameters)
-        return {"prompt": prompt}
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except KeyError as e:
-        raise HTTPException(status_code=400, detail=f"Missing required parameter: {e}")
-
-@app.post("/dify-qa", response_model=DifyResponse)
-async def dify_qa_endpoint(request: DifyQARequest):
-    """Dify问答接口"""
-    if not request.question:
-        return DifyResponse(
-            success=False,
-            error="Question is required",
-            timestamp=datetime.now().isoformat()
-        )
-    
-    rag_results = query_rag_service_direct(request.question, 5)
-    
-    if not rag_results:
-        return DifyResponse(
-            success=False,
-            error="No relevant documents found",
-            timestamp=datetime.now().isoformat()
-        )
-    
-    context = "\n\n".join([
-        f"文档: {result['filename']}\n内容: {result['text']}"
-        for result in rag_results
-    ])
-    
-    prompt = prompt_template.build_prompt(
-        "qa",
-        context=context,
-        question=request.question
-    )
-    
-    return DifyResponse(
-        success=True,
-        prompt=prompt,
-        context_count=len(rag_results),
-        timestamp=datetime.now().isoformat()
-    )
-
-@app.post("/dify-study-plan", response_model=DifyResponse)
-async def dify_study_plan_endpoint(request: DifyStudyPlanRequest):
-    """Dify学习计划接口"""
-    if not request.goal or not request.timeframe:
-        return DifyResponse(
-            success=False,
-            error="Goal and timeframe are required",
-            timestamp=datetime.now().isoformat()
-        )
-    
-    rag_results = query_rag_service_direct(request.goal, 10)
-    
-    if not rag_results:
-        return DifyResponse(
-            success=False,
-            error="No relevant learning materials found",
-            timestamp=datetime.now().isoformat()
-        )
-    
-    context = "\n\n".join([
-        f"知识点: {result['filename']}\n内容: {result['text']}"
-        for result in rag_results
-    ])
-    
-    prompt = prompt_template.build_prompt(
-        "study_plan",
-        context=context,
-        goal=request.goal,
-        timeframe=request.timeframe
-    )
-    
-    return DifyResponse(
-        success=True,
-        prompt=prompt,
-        materials_count=len(rag_results),
-        timestamp=datetime.now().isoformat()
-    )
+@app.get("/")
+async def root():
+    """根路径"""
+    return {"message": "Prompt Service 正在运行", "status": "ready"}
 
 @app.get("/health")
 async def health_check():
     """健康检查"""
-    rag_health = True
-    try:
-        response = requests.get(f"{RAG_SERVICE_URL}/health", timeout=5)
-        rag_health = response.status_code == 200
-    except:
-        rag_health = False
-    
-    return {
-        "status": "healthy" if rag_health else "degraded",
-        "rag_service": "healthy" if rag_health else "unhealthy",
-        "timestamp": datetime.now().isoformat()
-    }
+    return {"status": "healthy", "service": "Prompt Service"}
 
-@app.get("/templates")
-async def get_templates():
-    """获取可用模板"""
-    return {
-        "available_templates": list(prompt_template.templates.keys()),
-        "templates": {
-            template_type: {
-                "description": "Question answering template" if template_type == "qa" else "Study plan generation template",
-                "required_parameters": ["context", "question"] if template_type == "qa" else ["context", "goal", "timeframe"]
-            }
-            for template_type in prompt_template.templates.keys()
-        }
-    }
+@app.post("/prompt/qa", response_model=PromptResponse)
+async def build_qa_prompt(request: QAPromptRequest):
+    """构建问答 Prompt"""
+    try:
+        if not request.query.strip():
+            raise HTTPException(status_code=400, detail="查询内容不能为空")
+        
+        if request.top_k <= 0 or request.top_k > 20:
+            raise HTTPException(status_code=400, detail="top_k 必须在 1-20 之间")
+        
+        # 构建问答 Prompt
+        prompt = prompt_builder.build_qa_prompt(
+            query=request.query,
+            top_k=request.top_k,
+            filename=request.filename
+        )
+        
+        # 获取搜索结果数量
+        search_results = prompt_builder.search_knowledge(
+            request.query, 
+            request.top_k, 
+            request.filename
+        )
+        
+        return PromptResponse(
+            prompt=prompt,
+            prompt_type="qa",
+            query=request.query,
+            search_results_count=len(search_results)
+        )
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"构建问答 Prompt 失败: {str(e)}")
+
+@app.post("/prompt/learning-plan", response_model=PromptResponse)
+async def build_learning_plan_prompt(request: LearningPlanRequest):
+    """构建学习计划 Prompt"""
+    try:
+        if not request.goal.strip():
+            raise HTTPException(status_code=400, detail="学习目标不能为空")
+        
+        if not request.time_range.strip():
+            raise HTTPException(status_code=400, detail="时间范围不能为空")
+        
+        if request.top_k <= 0 or request.top_k > 20:
+            raise HTTPException(status_code=400, detail="top_k 必须在 1-20 之间")
+        
+        # 构建学习计划 Prompt
+        prompt = prompt_builder.build_learning_plan_prompt(
+            goal=request.goal,
+            time_range=request.time_range,
+            learning_background=request.learning_background,
+            top_k=request.top_k
+        )
+        
+        # 获取搜索结果数量
+        search_results = prompt_builder.search_knowledge(request.goal, request.top_k)
+        
+        return PromptResponse(
+            prompt=prompt,
+            prompt_type="learning_plan",
+            query=request.goal,
+            search_results_count=len(search_results)
+        )
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"构建学习计划 Prompt 失败: {str(e)}")
+
+@app.post("/prompt/summary", response_model=PromptResponse)
+async def build_summary_prompt(request: SummaryRequest):
+    """构建总结 Prompt"""
+    try:
+        if not request.content.strip():
+            raise HTTPException(status_code=400, detail="总结内容不能为空")
+        
+        if not request.summary_requirements.strip():
+            raise HTTPException(status_code=400, detail="总结要求不能为空")
+        
+        if request.top_k <= 0 or request.top_k > 20:
+            raise HTTPException(status_code=400, detail="top_k 必须在 1-20 之间")
+        
+        # 构建总结 Prompt
+        prompt = prompt_builder.build_summary_prompt(
+            content=request.content,
+            summary_requirements=request.summary_requirements,
+            top_k=request.top_k
+        )
+        
+        # 获取搜索结果数量
+        search_results = prompt_builder.search_knowledge(request.content, request.top_k)
+        
+        return PromptResponse(
+            prompt=prompt,
+            prompt_type="summary",
+            query=request.content,
+            search_results_count=len(search_results)
+        )
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"构建总结 Prompt 失败: {str(e)}")
+
+@app.post("/prompt/explanation", response_model=PromptResponse)
+async def build_explanation_prompt(request: ExplanationRequest):
+    """构建解释 Prompt"""
+    try:
+        if not request.concept.strip():
+            raise HTTPException(status_code=400, detail="解释概念不能为空")
+        
+        if not request.explanation_requirements.strip():
+            raise HTTPException(status_code=400, detail="解释要求不能为空")
+        
+        if request.top_k <= 0 or request.top_k > 20:
+            raise HTTPException(status_code=400, detail="top_k 必须在 1-20 之间")
+        
+        # 构建解释 Prompt
+        prompt = prompt_builder.build_explanation_prompt(
+            concept=request.concept,
+            explanation_requirements=request.explanation_requirements,
+            top_k=request.top_k
+        )
+        
+        # 获取搜索结果数量
+        search_results = prompt_builder.search_knowledge(request.concept, request.top_k)
+        
+        return PromptResponse(
+            prompt=prompt,
+            prompt_type="explanation",
+            query=request.concept,
+            search_results_count=len(search_results)
+        )
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"构建解释 Prompt 失败: {str(e)}")
+
+@app.post("/prompt/custom", response_model=PromptResponse)
+async def build_custom_prompt(request: CustomPromptRequest):
+    """构建自定义 Prompt"""
+    try:
+        if not request.query.strip():
+            raise HTTPException(status_code=400, detail="查询内容不能为空")
+        
+        if not request.prompt_type.strip():
+            raise HTTPException(status_code=400, detail="Prompt 类型不能为空")
+        
+        if request.top_k <= 0 or request.top_k > 20:
+            raise HTTPException(status_code=400, detail="top_k 必须在 1-20 之间")
+        
+        # 检查 Prompt 类型是否支持
+        available_types = prompt_builder.get_available_types()
+        if request.prompt_type not in available_types:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"不支持的 Prompt 类型: {request.prompt_type}。支持的类型: {available_types}"
+            )
+        
+        # 搜索相关知识
+        search_results = prompt_builder.search_knowledge(
+            request.query, 
+            request.top_k, 
+            request.filename
+        )
+        
+        # 构建自定义 Prompt
+        from prompt_builder import PromptContext
+        context = PromptContext(
+            query=request.query,
+            search_results=search_results,
+            additional_context=request.additional_context
+        )
+        
+        prompt = prompt_builder.build_prompt(PromptType(request.prompt_type), context)
+        
+        return PromptResponse(
+            prompt=prompt,
+            prompt_type=request.prompt_type,
+            query=request.query,
+            search_results_count=len(search_results)
+        )
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"构建自定义 Prompt 失败: {str(e)}")
+
+@app.post("/template/add", response_model=TemplateResponse)
+async def add_template(request: TemplateRequest):
+    """添加新的 Prompt 模板"""
+    try:
+        if not request.prompt_type.strip():
+            raise HTTPException(status_code=400, detail="Prompt 类型不能为空")
+        
+        if not request.template.strip():
+            raise HTTPException(status_code=400, detail="模板内容不能为空")
+        
+        # 添加新模板
+        prompt_builder.add_template(request.prompt_type, request.template)
+        
+        return TemplateResponse(
+            prompt_type=request.prompt_type,
+            template=request.template,
+            message="模板添加成功"
+        )
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"添加模板失败: {str(e)}")
+
+@app.get("/types", response_model=AvailableTypesResponse)
+async def get_available_types():
+    """获取可用的 Prompt 类型"""
+    try:
+        available_types = prompt_builder.get_available_types()
+        return AvailableTypesResponse(
+            available_types=available_types,
+            total_count=len(available_types)
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取 Prompt 类型失败: {str(e)}")
+
+@app.get("/rag/health")
+async def check_rag_health():
+    """检查 RAG 服务健康状态"""
+    try:
+        import requests
+        response = requests.get(f"{prompt_builder.rag_api_base}/health", timeout=5)
+        response.raise_for_status()
+        return {"status": "connected", "rag_service": "healthy"}
+    except Exception as e:
+        return {"status": "disconnected", "rag_service": "unhealthy", "error": str(e)}
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+    uvicorn.run(
+        "prompt_server:app",
+        host="0.0.0.0",
+        port=8001,
+        reload=False
+    )

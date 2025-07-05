@@ -1,9 +1,4 @@
-fastapi
-uvicorn
-requests
-PyPDF2
-sentence-transformers
-pymilvus
-torch
-transformers
-milvus-lite
+fastapi==0.104.1
+uvicorn==0.24.0
+pydantic==2.5.0
+requests==2.31.0 

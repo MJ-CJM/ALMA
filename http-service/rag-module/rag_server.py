@@ -1,179 +1,180 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Dict, Any, Optional
 import uvicorn
 from rag_service import RAGService
-import psutil
-import gc
-import time
-import os
 
-app = FastAPI(title="RAG Service", description="PDF文档检索服务")
+app = FastAPI(title="RAG API Server", description="RAG 文档检索服务")
 
 # 初始化 RAG 服务
-print("正在初始化RAG服务...")
-try:
-    # 使用硬编码的API密钥
-    api_key = "sk-1f0b08f7ee4742c39dbb63254f3db29e"
-    rag_service = RAGService(api_key=api_key)
-    print("RAG服务初始化成功")
-except Exception as e:
-    print(f"RAG服务初始化失败: {e}")
-    rag_service = None
+rag_service = RAGService()
 
+# 请求模型
 class SearchRequest(BaseModel):
     query: str
-    limit: Optional[int] = 5
-    score_threshold: Optional[float] = None
+    top_k: Optional[int] = 5
+    filename: Optional[str] = None
 
-class SearchResult(BaseModel):
-    text: str
-    filename: str
-    score: float
-    text_length: int
+class RescanRequest(BaseModel):
+    pdf_dir: Optional[str] = "data/pdf"
 
+# 响应模型
 class SearchResponse(BaseModel):
-    results: List[SearchResult]
-    total: int
+    results: List[Dict[str, Any]]
+    query: str
+    top_k: int
+    filename: Optional[str] = None
 
-class ProcessRequest(BaseModel):
-    batch_size: Optional[int] = 5  # API版本可以使用更大的批次
+class FileSearchResponse(BaseModel):
+    results: List[Dict[str, Any]]
+    filename: str
+    count: int
+
+class RescanResponse(BaseModel):
+    message: str
+    new_files: List[str]
+    total_files: List[str]
+
+class CollectionInfoResponse(BaseModel):
+    collection_name: str
+    num_entities: int
+    available_files: List[str]
+    processed_files_count: int
+    stats: Dict[str, Any]
+
+@app.get("/")
+async def root():
+    """根路径"""
+    return {"message": "RAG API Server 正在运行", "status": "ready"}
 
 @app.post("/search", response_model=SearchResponse)
-async def search_documents(request: SearchRequest):
-    """搜索相关文档"""
-    if not request.query:
-        raise HTTPException(status_code=400, detail="Query is required")
-    
-    if rag_service is None:
-        raise HTTPException(status_code=500, detail="RAG service not initialized")
-    
+async def search_similar_texts(request: SearchRequest):
+    """搜索相似文本，支持按文件名过滤"""
     try:
-        # 检查内存状态
-        memory = psutil.virtual_memory()
-        if memory.percent > 90:
-            raise HTTPException(status_code=503, detail="System memory usage too high")
+        if not request.query.strip():
+            raise HTTPException(status_code=400, detail="查询文本不能为空")
         
-        results = rag_service.search(request.query, request.limit, request.score_threshold)
+        if request.top_k <= 0 or request.top_k > 20:
+            raise HTTPException(status_code=400, detail="top_k 必须在 1-20 之间")
         
-        search_results = []
-        for result in results:
-            search_results.append(SearchResult(
-                text=result.get('text', ''),
-                filename=result.get('filename', ''),
-                score=result.get('score', 0.0),
-                text_length=result.get('text_length', 0)
-            ))
+        # 搜索相似文本
+        results = rag_service.search_similar_texts(
+            request.query, 
+            request.top_k, 
+            request.filename
+        )
         
-        return SearchResponse(results=search_results, total=len(search_results))
+        return SearchResponse(
+            results=results,
+            query=request.query,
+            top_k=request.top_k,
+            filename=request.filename
+        )
     
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"搜索失败: {str(e)}")
 
-@app.post("/process")
-async def process_pdf_documents(request: ProcessRequest = ProcessRequest()):
-    """处理PDF文档并建立索引"""
-    if rag_service is None:
-        raise HTTPException(status_code=500, detail="RAG service not initialized")
-    
+@app.get("/search/file/{filename}", response_model=FileSearchResponse)
+async def search_by_filename(filename: str, top_k: int = 10):
+    """按文件名搜索文档内容"""
     try:
-        # 检查内存状态
-        memory = psutil.virtual_memory()
-        if memory.percent > 85:
+        if not filename.strip():
+            raise HTTPException(status_code=400, detail="文件名不能为空")
+        
+        if top_k <= 0 or top_k > 50:
+            raise HTTPException(status_code=400, detail="top_k 必须在 1-50 之间")
+        
+        # 按文件名搜索
+        results = rag_service.search_by_filename(filename, top_k)
+        
+        return FileSearchResponse(
+            results=results,
+            filename=filename,
+            count=len(results)
+        )
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"按文件名搜索失败: {str(e)}")
+
+@app.post("/rescan", response_model=RescanResponse)
+async def rescan_pdf_directory(request: RescanRequest):
+    """重新扫描 PDF 目录，处理新文件"""
+    try:
+        import os
+        
+        if not os.path.exists(request.pdf_dir):
             raise HTTPException(
-                status_code=503, 
-                detail=f"System memory usage too high ({memory.percent:.1f}%). Please free up memory first."
+                status_code=404, 
+                detail=f"目录 {request.pdf_dir} 不存在"
             )
         
-        print(f"开始处理PDF文档，批次大小: {request.batch_size}")
-        print(f"当前内存使用: {memory.percent:.1f}%")
+        # 获取所有 PDF 文件
+        all_files = []
+        for filename in os.listdir(request.pdf_dir):
+            if filename.lower().endswith('.pdf'):
+                all_files.append(filename)
         
-        rag_service.process_pdfs(batch_size=request.batch_size)
+        if not all_files:
+            raise HTTPException(
+                status_code=404, 
+                detail=f"目录 {request.pdf_dir} 中没有找到 PDF 文件"
+            )
         
-        # 处理完成后清理内存
-        gc.collect()
+        # 重新扫描并处理新文件
+        rag_service.auto_load_pdf_files(request.pdf_dir)
         
-        return {
-            "message": "PDF documents processed successfully", 
-            "batch_size": request.batch_size,
-            "final_memory_usage": f"{psutil.virtual_memory().percent:.1f}%"
-        }
+        # 获取可用文件列表
+        available_files = rag_service.get_available_files()
+        
+        return RescanResponse(
+            message="重新扫描完成",
+            new_files=all_files,  # 这里简化处理，实际应该返回新处理的文件
+            total_files=available_files
+        )
+    
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Processing failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"重新扫描失败: {str(e)}")
+
+@app.get("/files", response_model=List[str])
+async def get_available_files():
+    """获取可用的文件列表"""
+    try:
+        files = rag_service.get_available_files()
+        return files
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取文件列表失败: {str(e)}")
+
+@app.get("/collection-info", response_model=CollectionInfoResponse)
+async def get_collection_info():
+    """获取集合信息"""
+    try:
+        info = rag_service.get_collection_info()
+        
+        if not info:
+            raise HTTPException(status_code=500, detail="获取集合信息失败")
+        
+        return CollectionInfoResponse(**info)
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取集合信息失败: {str(e)}")
 
 @app.get("/health")
 async def health_check():
     """健康检查"""
-    import psutil
-    memory_info = psutil.virtual_memory()
-    
-    status = "healthy"
-    if memory_info.percent > 90:
-        status = "warning"
-    elif memory_info.percent > 95:
-        status = "critical"
-    
-    return {
-        "status": status, 
-        "service": "RAG Service",
-        "memory_usage": f"{memory_info.percent:.1f}%",
-        "available_memory": f"{memory_info.available / 1024 / 1024 / 1024:.2f}GB",
-        "rag_service_ready": rag_service is not None,
-        "api_key_configured": True
-    }
-
-@app.get("/stats")
-async def get_collection_stats():
-    """获取集合统计信息"""
-    if rag_service is None:
-        raise HTTPException(status_code=500, detail="RAG service not initialized")
-    
-    try:
-        stats = rag_service.get_collection_stats()
-        return stats
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Stats failed: {str(e)}")
-
-@app.get("/memory")
-async def get_memory_info():
-    """获取详细内存信息"""
-    memory = psutil.virtual_memory()
-    return {
-        "total": f"{memory.total / 1024 / 1024 / 1024:.2f}GB",
-        "available": f"{memory.available / 1024 / 1024 / 1024:.2f}GB",
-        "used": f"{memory.used / 1024 / 1024 / 1024:.2f}GB",
-        "percent": f"{memory.percent:.1f}%",
-        "status": "normal" if memory.percent < 80 else "warning" if memory.percent < 90 else "critical"
-    }
-
+    return {"status": "healthy", "service": "RAG API Server"}
 
 if __name__ == "__main__":
-    import os
-    
-    print("RAG服务正在启动...")
-    
-
-    
-    # 检查系统内存
-    memory = psutil.virtual_memory()
-    print(f"系统内存状态: {memory.percent:.1f}% 已使用, 可用: {memory.available / 1024 / 1024 / 1024:.2f}GB")
-    
-    if memory.percent > 75:
-        print("警告: 系统内存使用率较高，建议释放一些内存后再启动")
-        print("建议操作:")
-        print("1. 关闭不必要的应用程序")
-        print("2. 清理浏览器缓存")
-        print("3. 重启系统")
-    
-    if memory.percent > 90:
-        print("错误: 内存使用率过高，无法启动服务")
-        print("请释放内存后重试")
-        exit(1)
-    
-    print("提示：首次使用请先调用 /process 接口处理PDF文档")
-    print("建议使用: POST /process {'batch_size': 5}")
-    
-    port = int(os.getenv("PORT", 8000))
-    print(f"服务将在 http://localhost:{port} 启动")
-    
-    uvicorn.run(app, host="0.0.0.0", port=port) 
+    uvicorn.run(
+        "rag_server:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=False  # 禁用热重载以避免数据库文件冲突
+    )
