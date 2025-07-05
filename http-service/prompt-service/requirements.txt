@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+requests
+PyPDF2
+sentence-transformers
+pymilvus
+torch
+transformers
+milvus-lite
