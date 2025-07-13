@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi import Query
+import uvicorn
 
 from fastapi import Request
 from pydantic import BaseModel
@@ -23,3 +24,11 @@ def extract(string):
 def find(keywords:str = Query()):
   keyword = extract(keywords)
   return keyword
+
+if __name__ == "__main__":
+    uvicorn.run(
+        "plan:app",
+        host="0.0.0.0",
+        port=8001,
+        reload=False
+    )
