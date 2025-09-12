@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 Prompt Service 简化版 Demo
-直接调用 embedding API 和向量数据库，实现问答功能
+连接远程 Milvus 数据库，实现问答功能
 """
 
 import os
@@ -10,7 +10,8 @@ import sys
 import requests
 import json
 from openai import OpenAI
-from pymilvus import MilvusClient
+from pymilvus import MilvusClient, connections, utility
+
 
 class SimplePromptDemo:
     def __init__(self):
@@ -19,12 +20,18 @@ class SimplePromptDemo:
             api_key="sk-1f0b08f7ee4742c39dbb63254f3db29e",
             base_url="https://dashscope.aliyuncs.com/compatible-mode/v1"
         )
-        
-        # 连接 Milvus
-        self.db_file = os.path.join("..", "rag-module", "db_data", "milvus_lite.db")
-        self.milvus = MilvusClient(self.db_file)
+
+        # 连接远程 Milvus
+        self.milvus_host = "101.34.214.7"  # 或者您的远程主机IP
+        self.milvus_port = "6002"
+
+        # 使用 MilvusClient 连接远程服务器
+        self.milvus = MilvusClient(
+            uri=f"http://{self.milvus_host}:{self.milvus_port}"
+        )
+
         self.collection_name = "prompt_demo_collection"  # 使用独立的集合名
-        
+
         # 知识库文本
         self.knowledge_texts = [
             "人工智能是计算机科学的一个分支，致力于创建能够执行通常需要人类智能的任务的系统。",
@@ -36,13 +43,13 @@ class SimplePromptDemo:
             "知识图谱是结构化的知识表示方法，用于组织和连接实体之间的关系。",
             "语义分析是自然语言处理的重要任务，用于理解文本的深层含义。"
         ]
-    
+
     def setup_knowledge_base(self):
         """设置知识库"""
         print("=" * 50)
         print("设置知识库")
         print("=" * 50)
-        
+
         # 生成 embedding
         print("生成知识库文本的 embedding...")
         response = self.client.embeddings.create(
@@ -50,19 +57,23 @@ class SimplePromptDemo:
             model="text-embedding-v1"
         )
         embeddings = [item.embedding for item in response.data]
-        
+
         # 检查集合是否存在
         collections = self.milvus.list_collections()
-        if self.collection_name not in collections:
-            # 创建集合
-            self.milvus.create_collection(
-                collection_name=self.collection_name,
-                dimension=len(embeddings[0]),
-                primary_field_name="id",
-                vector_field_name="embedding"
-            )
-            print(f"创建集合: {self.collection_name}")
-        
+        if self.collection_name in collections:
+            # 如果集合存在，先删除（可选，或者选择跳过重新创建）
+            print(f"集合 {self.collection_name} 已存在，正在删除...")
+            self.milvus.drop_collection(self.collection_name)
+
+        # 创建集合
+        self.milvus.create_collection(
+            collection_name=self.collection_name,
+            dimension=len(embeddings[0]),
+            primary_field_name="id",
+            vector_field_name="embedding"
+        )
+        print(f"创建集合: {self.collection_name}")
+
         # 插入知识库数据
         data = []
         for i, (text, emb) in enumerate(zip(self.knowledge_texts, embeddings)):
@@ -73,13 +84,17 @@ class SimplePromptDemo:
                 "filename": "knowledge_base.txt",
                 "file_hash": "kb_hash_123"
             })
-        
+
         self.milvus.insert(
             collection_name=self.collection_name,
             data=data
         )
         print(f"成功插入 {len(data)} 条知识库数据")
-    
+
+        # 刷新集合以确保数据可搜索
+        self.milvus.flush(collection_name=self.collection_name)
+        print("数据已刷新到持久化存储")
+
     def search_similar_texts(self, query: str, top_k: int = 3):
         """搜索相似文本"""
         # 生成查询的 embedding
@@ -88,7 +103,7 @@ class SimplePromptDemo:
             model="text-embedding-v1"
         )
         query_embedding = response.data[0].embedding
-        
+
         # 搜索相似文本
         results = self.milvus.search(
             collection_name=self.collection_name,
@@ -96,9 +111,9 @@ class SimplePromptDemo:
             limit=top_k,
             output_fields=["id", "text"]
         )
-        
+
         return results[0] if results else []
-    
+
     def generate_answer(self, query: str, context: str):
         """生成答案"""
         prompt = f"""基于以下知识库内容，回答用户的问题。
@@ -109,7 +124,7 @@ class SimplePromptDemo:
 用户问题：{query}
 
 请提供准确、详细的回答："""
-        
+
         response = self.client.chat.completions.create(
             model="qwen-turbo",
             messages=[
@@ -119,15 +134,15 @@ class SimplePromptDemo:
             temperature=0.7,
             max_tokens=500
         )
-        
+
         return response.choices[0].message.content
-    
+
     def qa_demo(self):
         """问答演示"""
         print("\n" + "=" * 50)
         print("问答演示")
         print("=" * 50)
-        
+
         # 示例问题
         questions = [
             "什么是人工智能？",
@@ -135,43 +150,43 @@ class SimplePromptDemo:
             "自然语言处理有哪些应用？",
             "强化学习是如何工作的？"
         ]
-        
+
         for i, question in enumerate(questions, 1):
             print(f"\n问题 {i}: {question}")
             print("-" * 40)
-            
+
             # 搜索相关文本
             similar_texts = self.search_similar_texts(question, top_k=3)
-            
+
             if similar_texts:
                 # 构建上下文
                 context = "\n".join([hit.get('text', '') for hit in similar_texts])
                 print(f"找到 {len(similar_texts)} 个相关文本片段")
-                
+
                 # 生成答案
                 answer = self.generate_answer(question, context)
                 print(f"答案: {answer}")
             else:
                 print("未找到相关文本")
-    
+
     def interactive_qa(self):
         """交互式问答"""
         print("\n" + "=" * 50)
         print("交互式问答 (输入 'quit' 退出)")
         print("=" * 50)
-        
+
         while True:
             try:
                 question = input("\n请输入您的问题: ").strip()
                 if question.lower() in ['quit', 'exit', '退出']:
                     break
-                
+
                 if not question:
                     continue
-                
+
                 print("正在搜索相关知识...")
                 similar_texts = self.search_similar_texts(question, top_k=3)
-                
+
                 if similar_texts:
                     context = "\n".join([hit.get('text', '') for hit in similar_texts])
                     print("正在生成答案...")
@@ -179,30 +194,47 @@ class SimplePromptDemo:
                     print(f"\n答案: {answer}")
                 else:
                     print("抱歉，未找到相关知识来回答您的问题。")
-                    
+
             except KeyboardInterrupt:
                 print("\n\n退出交互式问答")
                 break
             except Exception as e:
                 print(f"发生错误: {e}")
 
+    def test_connection(self):
+        """测试 Milvus 连接"""
+        try:
+            collections = self.milvus.list_collections()
+            print(f"成功连接到 Milvus，当前集合: {collections}")
+            return True
+        except Exception as e:
+            print(f"连接 Milvus 失败: {e}")
+            return False
+
+
 def main():
     """主函数"""
-    print("Prompt Service 简化版 Demo")
+    print("Prompt Service 简化版 Demo (远程 Milvus)")
     print("=" * 60)
-    
+
     demo = SimplePromptDemo()
-    
+
+    # 测试连接
+    if not demo.test_connection():
+        print("无法连接到 Milvus 服务器，请检查服务是否正常运行")
+        return
+
     # 设置知识库
     demo.setup_knowledge_base()
-    
+
     # 运行问答演示
     demo.qa_demo()
-    
+
     # 交互式问答
     demo.interactive_qa()
-    
+
     print("\nDemo 结束")
 
+
 if __name__ == "__main__":
-    main() 
+    main()

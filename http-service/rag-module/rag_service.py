@@ -20,9 +20,9 @@ class RAGService:
         self.collection_name = "rag_documents"
         self.dim = 1024  # embedding 维度
         
-        # 确保 db_data 目录存在
-        self.db_data_dir = "db_data"
-        os.makedirs(self.db_data_dir, exist_ok=True)
+        # 确保 db_data 目录存在（本地数据库）
+        # self.db_data_dir = "db_data"
+        # os.makedirs(self.db_data_dir, exist_ok=True)
         
         # 文件管理
         self.processed_files = set()  # 已处理的文件集合
@@ -35,40 +35,51 @@ class RAGService:
         # 自动加载 PDF 文件
         self.auto_load_pdf_files()
     
+    # def _connect_milvus(self):
+    #     """连接 Milvus Lite 本地数据库"""
+    #     max_retries = 3
+    #     retry_delay = 1
+    #
+    #     for attempt in range(max_retries):
+    #         try:
+    #             db_file = os.path.join(self.db_data_dir, "milvus_lite.db")
+    #
+    #             # 检查文件是否被锁定
+    #             if os.path.exists(db_file):
+    #                 try:
+    #                     # 尝试打开文件检查是否被锁定
+    #                     with open(db_file, 'r+b') as f:
+    #                         pass
+    #                 except (IOError, PermissionError):
+    #                     print(f"数据库文件被锁定，等待 {retry_delay} 秒后重试...")
+    #                     time.sleep(retry_delay)
+    #                     retry_delay *= 2
+    #                     continue
+    #
+    #             self.milvus_client = MilvusClient(db_file)
+    #             print(f"成功连接到 Milvus Lite，数据存储在: {db_file}")
+    #             return
+    #
+    #         except Exception as e:
+    #             print(f"连接尝试 {attempt + 1}/{max_retries} 失败: {e}")
+    #             if attempt < max_retries - 1:
+    #                 print(f"等待 {retry_delay} 秒后重试...")
+    #                 time.sleep(retry_delay)
+    #                 retry_delay *= 2
+    #             else:
+    #                 print("所有连接尝试都失败，请检查数据库文件是否被其他进程占用")
+    #                 raise
+
     def _connect_milvus(self):
-        """连接 Milvus Lite 本地数据库"""
-        max_retries = 3
-        retry_delay = 1
-        
-        for attempt in range(max_retries):
-            try:
-                db_file = os.path.join(self.db_data_dir, "milvus_lite.db")
-                
-                # 检查文件是否被锁定
-                if os.path.exists(db_file):
-                    try:
-                        # 尝试打开文件检查是否被锁定
-                        with open(db_file, 'r+b') as f:
-                            pass
-                    except (IOError, PermissionError):
-                        print(f"数据库文件被锁定，等待 {retry_delay} 秒后重试...")
-                        time.sleep(retry_delay)
-                        retry_delay *= 2
-                        continue
-                
-                self.milvus_client = MilvusClient(db_file)
-                print(f"成功连接到 Milvus Lite，数据存储在: {db_file}")
-                return
-                
-            except Exception as e:
-                print(f"连接尝试 {attempt + 1}/{max_retries} 失败: {e}")
-                if attempt < max_retries - 1:
-                    print(f"等待 {retry_delay} 秒后重试...")
-                    time.sleep(retry_delay)
-                    retry_delay *= 2
-                else:
-                    print("所有连接尝试都失败，请检查数据库文件是否被其他进程占用")
-                    raise
+        """连接远程 Milvus 服务器"""
+        try:
+            self.milvus_client = MilvusClient(
+                uri="http://101.34.214.7:6002"  # 如 http://101.34.214.7:6002
+            )
+            print("成功连接到远程 Milvus 服务器")
+        except Exception as e:
+            print(f"连接 Milvus 失败: {e}")
+            raise
     
     def _create_collection(self):
         """创建 Milvus 集合"""
