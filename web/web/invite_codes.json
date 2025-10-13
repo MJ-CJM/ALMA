@@ -1,0 +1,13 @@
+{
+  "codes": {
+    "ALMA2024001": {
+      "status": "active",
+      "max_uses": 1,
+      "used_count": 0,
+      "created_at": "2025-10-08T11:42:44.643419",
+      "expires_at": "2026-10-08T11:42:44.643425",
+      "description": "默认测试邀请码"
+    }
+  },
+  "users": {}
+}

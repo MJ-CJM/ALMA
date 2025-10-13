@@ -1,8 +1,15 @@
 import os
+import os
 import json
 import requests
 import streamlit as st
 from uuid import uuid4
+from auth import InviteCodeAuth, require_login, show_user_info_and_logout
+
+# -------------------------
+# 认证配置
+# -------------------------
+auth = InviteCodeAuth()
 
 # -------------------------
 # Dify 配置（自建请改 API_BASE；生产建议改用环境变量传 Key）
@@ -40,6 +47,12 @@ st.set_page_config(
 )
 
 # -------------------------
+# 登录检查
+# -------------------------
+if not require_login(auth):
+    st.stop()  # 停止执行，显示登录页面
+
+# -------------------------
 # 常量定义
 # -------------------------
 MAX_CONVERSATIONS = 12
@@ -72,6 +85,9 @@ if "user_name" not in st.session_state:
 # 侧边栏
 # -------------------------
 with st.sidebar:
+    # 显示用户信息和登出按钮
+    show_user_info_and_logout(auth)
+    
     st.title("探索功能")
     st.divider()
 

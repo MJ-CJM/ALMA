@@ -1,0 +1,29 @@
+{
+  "codes": {
+    "ALMA2024001": {
+      "status": "active",
+      "max_uses": 1,
+      "used_count": 1,
+      "created_at": "2024-10-08T00:00:00",
+      "expires_at": "2025-10-08T23:59:59",
+      "description": "默认测试邀请码"
+    },
+    "ALMA2024002": {
+      "status": "active",
+      "max_uses": 3,
+      "used_count": 0,
+      "created_at": "2024-10-08T00:00:00",
+      "expires_at": "2025-12-31T23:59:59",
+      "description": "多次使用测试码"
+    },
+    "ALMA2024003": {
+      "status": "active",
+      "max_uses": 1,
+      "used_count": 0,
+      "created_at": "2024-10-08T00:00:00",
+      "expires_at": "2025-06-30T23:59:59",
+      "description": "半年有效期测试码"
+    }
+  },
+  "users": {}
+}
