@@ -1,46 +1,23 @@
 import os
-import os
 import json
-import requests
 import streamlit as st
 from uuid import uuid4
-from auth import InviteCodeAuth, require_login, show_user_info_and_logout
+from datetime import datetime
+from auth import AuthManager, require_auth
+from models import DatabaseManager
+from backend import get_workflow_list, run_dify_workflow
 
 # -------------------------
-# 认证配置
+# 初始化
 # -------------------------
-auth = InviteCodeAuth()
-
-# -------------------------
-# Dify 配置（自建请改 API_BASE；生产建议改用环境变量传 Key）
-# -------------------------
-DIFY_API_BASE = os.getenv("DIFY_API_BASE", "http://ai.wenhan.top:8080")
-DIFY_API_KEY  = os.getenv("DIFY_API_KEY", "Bearer app-F4F2QM3rjs8DZgTtpIitoxlx")
-DIFY_HEADERS  = {
-    "Authorization": DIFY_API_KEY,
-    "Content-Type": "application/json",
-}
-
-def run_dify_workflow_blocking(question: str, user_id: str) -> dict:
-    """
-    调用 Dify 工作流（blocking 模式），返回 JSON。
-    你的 Start 节点输入只有 question:string，则按如下 inputs 发送。
-    """
-    url = f"{DIFY_API_BASE}/v1/workflows/run"
-    payload = {
-        "inputs": {"question": question},
-        "response_mode": "blocking",
-        "user": user_id,
-    }
-    resp = requests.post(url, headers=DIFY_HEADERS, json=payload, timeout=120)
-    resp.raise_for_status()
-    return resp.json()
+auth_manager = AuthManager()
+db_manager = DatabaseManager()
 
 # -------------------------
 # 页面配置
 # -------------------------
 st.set_page_config(
-    page_title="AI Chat Assistant",
+    page_title="ALMA AI 助手",
     page_icon="🤖",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -49,7 +26,7 @@ st.set_page_config(
 # -------------------------
 # 登录检查
 # -------------------------
-if not require_login(auth):
+if not require_auth(auth_manager):
     st.stop()  # 停止执行，显示登录页面
 
 # -------------------------
@@ -64,29 +41,104 @@ AVATAR_OPTIONS = ["👤", "😊", "🎮", "👻", "🐱", "🐶", "🦊", "🐼"
 # 初始化会话状态
 # -------------------------
 if "conversations" not in st.session_state:
-    st.session_state.conversations = {
-        "新对话 1": {
-            "id": str(uuid4()),
-            "history": [{"role": "assistant", "content": "让我们开始聊天吧！👇"}]
-        }
-    }
+    st.session_state.conversations = {}
 if "current_conversation" not in st.session_state:
-    st.session_state.current_conversation = "新对话 1"
+    st.session_state.current_conversation = None
 if "conversation_counter" not in st.session_state:
-    st.session_state.conversation_counter = 1
+    st.session_state.conversation_counter = 0
 if "rename_mode" not in st.session_state:
     st.session_state.rename_mode = None
 if "user_avatar" not in st.session_state:
     st.session_state.user_avatar = DEFAULT_AVATAR
 if "user_name" not in st.session_state:
     st.session_state.user_name = DEFAULT_NAME
+if "conversations_loaded" not in st.session_state:
+    st.session_state.conversations_loaded = False
+
+# -------------------------
+# 加载用户对话
+# -------------------------
+def load_user_conversations():
+    """从数据库加载用户对话"""
+    if st.session_state.conversations_loaded:
+        return
+    
+    try:
+        user_id = st.session_state.user_id
+        conversations = db_manager.load_user_conversations(user_id)
+        
+        if conversations:
+            st.session_state.conversations = {}
+            for conv in conversations:
+                # 加载对话消息
+                messages = db_manager.load_conversation_messages(conv['id'])
+                message_list = []
+                for msg in messages:
+                    message_list.append({
+                        "role": msg['role'],
+                        "content": msg['content']
+                    })
+                
+                st.session_state.conversations[conv['conversation_name']] = {
+                    "id": conv['id'],
+                    "workflow_id": conv['workflow_id'],
+                    "history": message_list
+                }
+            
+            # 设置当前对话
+            if not st.session_state.current_conversation:
+                st.session_state.current_conversation = list(st.session_state.conversations.keys())[0]
+        else:
+            # 如果没有对话，创建一个默认对话
+            workflows = get_workflow_list()
+            if workflows:
+                default_workflow = workflows[0]['id']
+                create_new_conversation("新对话 1", default_workflow)
+        
+        st.session_state.conversations_loaded = True
+        
+    except Exception as e:
+        st.error(f"加载对话失败: {e}")
+
+def create_new_conversation(name: str, workflow_id: str):
+    """创建新对话"""
+    try:
+        user_id = st.session_state.user_id
+        conversation_id = db_manager.save_conversation(user_id, name, workflow_id)
+        
+        if conversation_id:
+            # 添加欢迎消息
+            db_manager.save_message(conversation_id, "assistant", "让我们开始聊天吧！👇")
+            
+            st.session_state.conversations[name] = {
+                "id": conversation_id,
+                "workflow_id": workflow_id,
+                "history": [{"role": "assistant", "content": "让我们开始聊天吧！👇"}]
+            }
+            
+            return True
+        return False
+        
+    except Exception as e:
+        st.error(f"创建对话失败: {e}")
+        return False
+
+def save_message_to_db(conversation_id: int, role: str, content: str):
+    """保存消息到数据库"""
+    try:
+        db_manager.save_message(conversation_id, role, content)
+    except Exception as e:
+        st.error(f"保存消息失败: {e}")
+
+# 加载用户对话
+load_user_conversations()
 
 # -------------------------
 # 侧边栏
 # -------------------------
 with st.sidebar:
     # 显示用户信息和登出按钮
-    show_user_info_and_logout(auth)
+    auth_manager.show_user_info_and_logout()
     
     st.title("探索功能")
     st.divider()
@@ -111,6 +163,64 @@ with st.sidebar:
 
     st.divider()
 
+    # 文件上传功能
+    st.subheader("📁 知识库文件上传")
+    uploaded_file = st.file_uploader(
+        "选择文件",
+        type=['pdf', 'txt', 'doc', 'docx', 'md'],
+        help="支持 PDF、TXT、DOC、DOCX、MD 格式"
+    )
+    
+    if uploaded_file is not None:
+        try:
+            # 创建用户上传目录
+            user_upload_dir = f"uploads/{st.session_state.username}"
+            os.makedirs(user_upload_dir, exist_ok=True)
+            
+            # 保存文件
+            file_path = os.path.join(user_upload_dir, uploaded_file.name)
+            with open(file_path, "wb") as f:
+                f.write(uploaded_file.getbuffer())
+            
+            # 保存到数据库
+            file_id = db_manager.save_uploaded_file(
+                st.session_state.user_id,
+                uploaded_file.name,
+                file_path
+            )
+            
+            if file_id:
+                st.success(f"文件 {uploaded_file.name} 上传成功，等待管理员审批")
+            else:
+                st.error("文件上传失败")
+                
+        except Exception as e:
+            st.error(f"文件上传失败: {e}")
+    
+    # 显示用户上传的文件
+    try:
+        user_files = db_manager.get_user_uploaded_files(st.session_state.user_id)
+        if user_files:
+            st.write("**我的文件**")
+            for file_info in user_files:
+                status_emoji = {
+                    'pending': '⏳',
+                    'approved': '✅',
+                    'rejected': '❌'
+                }
+                status_text = {
+                    'pending': '待审批',
+                    'approved': '已通过',
+                    'rejected': '已拒绝'
+                }
+                
+                st.write(f"{status_emoji.get(file_info['status'], '❓')} {file_info['filename']} - {status_text.get(file_info['status'], '未知')}")
+    except Exception as e:
+        st.error(f"加载文件列表失败: {e}")
+
+    st.divider()
+
+    # 对话管理
     current_conv_count = len(st.session_state.conversations)
     st.caption(f"当前对话数量: {current_conv_count}/{MAX_CONVERSATIONS}")
 
@@ -124,14 +234,36 @@ with st.sidebar:
         """, unsafe_allow_html=True)
     else:
         if st.button("➕ 新建对话", use_container_width=True):
-            st.session_state.conversation_counter += 1
-            new_name = f"新对话 {st.session_state.conversation_counter}"
-            st.session_state.conversations[new_name] = {
-                "id": str(uuid4()),
-                "history": [{"role": "assistant", "content": "让我们开始新的对话吧！👇"}]
-            }
-            st.session_state.current_conversation = new_name
+            # 显示工作流选择对话框
+            st.session_state.show_workflow_selector = True
             st.rerun()
+
+    # 工作流选择对话框
+    if st.session_state.get("show_workflow_selector", False):
+        st.markdown("**选择工作流**")
+        workflows = get_workflow_list()
+        
+        if workflows:
+            workflow_options = {f"{w['name']} - {w['description']}": w['id'] for w in workflows}
+            selected_workflow = st.selectbox("选择工作流", list(workflow_options.keys()))
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("确认", key="confirm_workflow"):
+                    workflow_id = workflow_options[selected_workflow]
+                    st.session_state.conversation_counter += 1
+                    new_name = f"新对话 {st.session_state.conversation_counter}"
+                    
+                    if create_new_conversation(new_name, workflow_id):
+                        st.session_state.current_conversation = new_name
+                        st.session_state.show_workflow_selector = False
+                        st.rerun()
+            with col2:
+                if st.button("取消", key="cancel_workflow"):
+                    st.session_state.show_workflow_selector = False
+                    st.rerun()
+        else:
+            st.error("没有可用的工作流")
 
     st.divider()
 
@@ -159,7 +291,15 @@ with st.sidebar:
                         else:
                             st.warning("对话名称已存在")
             else:
+                # 显示工作流信息
+                conv_info = st.session_state.conversations[conv_name]
+                workflow_id = conv_info.get('workflow_id', '')
+                workflows = get_workflow_list()
+                workflow_name = next((w['name'] for w in workflows if w['id'] == workflow_id), workflow_id)
+                
                 btn_label = f"{'🔵' if conv_name == st.session_state.current_conversation else '⚪'} {conv_name}"
+                btn_label += f"\n📋 {workflow_name}"
+                
                 if st.button(btn_label, key=f"conv_{conv_name}"):
                     st.session_state.current_conversation = conv_name
                     st.rerun()
@@ -172,8 +312,12 @@ with st.sidebar:
         with col3:
             if len(st.session_state.conversations) > 1:
                 if st.button("🗑️", key=f"del_{conv_name}"):
-                    # 这里原来会请求 http://localhost:8000/reset
-                    # Dify 的工作流执行接口是无状态的，删除会话只需清本地状态即可
+                    # 从数据库删除对话
+                    conv_info = st.session_state.conversations[conv_name]
+                    conversation_id = conv_info['id']
+                    db_manager.delete_conversation(conversation_id, st.session_state.user_id)
+                    
+                    # 从会话状态删除
                     del st.session_state.conversations[conv_name]
                     if conv_name == st.session_state.current_conversation:
                         st.session_state.current_conversation = list(st.session_state.conversations.keys())[0]
@@ -182,52 +326,58 @@ with st.sidebar:
 # -------------------------
 # 主界面
 # -------------------------
-st.caption(f"当前对话：{st.session_state.current_conversation}")
+if st.session_state.current_conversation:
+    st.caption(f"当前对话：{st.session_state.current_conversation}")
+    
+    # 显示工作流信息
+    current_conv = st.session_state.conversations[st.session_state.current_conversation]
+    workflow_id = current_conv.get('workflow_id', '')
+    workflows = get_workflow_list()
+    workflow_name = next((w['name'] for w in workflows if w['id'] == workflow_id), workflow_id)
+    st.caption(f"工作流：{workflow_name}")
 
-# 显示聊天记录
-current_conv = st.session_state.conversations[st.session_state.current_conversation]
-for message in current_conv["history"]:
-    with st.chat_message(
-        message["role"],
-        avatar=st.session_state.user_avatar if message["role"] == "user" else "🤖"
-    ):
-        if message["role"] == "user":
-            st.markdown(f"**{st.session_state.user_name}**: {message['content']}")
-        else:
-            st.markdown(f"**AI助手**: {message['content']}")
+    # 显示聊天记录
+    for message in current_conv["history"]:
+        with st.chat_message(
+            message["role"],
+            avatar=st.session_state.user_avatar if message["role"] == "user" else "🤖"
+        ):
+            if message["role"] == "user":
+                st.markdown(f"**{st.session_state.user_name}**: {message['content']}")
+            else:
+                st.markdown(f"**AI助手**: {message['content']}")
 
-# 用户输入
-if prompt := st.chat_input(f"你好，{st.session_state.user_name}，有什么可以帮你的吗？"):
-    current_conv["history"].append({"role": "user", "content": prompt})
+    # 用户输入
+    if prompt := st.chat_input(f"你好，{st.session_state.user_name}，有什么可以帮你的吗？"):
+        # 添加用户消息到会话状态
+        current_conv["history"].append({"role": "user", "content": prompt})
+        
+        # 保存用户消息到数据库
+        save_message_to_db(current_conv["id"], "user", prompt)
 
-    # 显示用户消息
-    with st.chat_message("user", avatar=st.session_state.user_avatar):
-        st.markdown(f"**{st.session_state.user_name}**: {prompt}")
+        # 显示用户消息
+        with st.chat_message("user", avatar=st.session_state.user_avatar):
+            st.markdown(f"**{st.session_state.user_name}**: {prompt}")
 
-    # 获取AI回复（调用 Dify 工作流：blocking）
-    with st.chat_message("assistant", avatar="🤖"):
-        message_placeholder = st.empty()
-        with st.spinner("正在生成回复..."):
-            try:
-                data = run_dify_workflow_blocking(prompt, st.session_state.user_name or "cjm")
+        # 获取AI回复
+        with st.chat_message("assistant", avatar="🤖"):
+            message_placeholder = st.empty()
+            with st.spinner("正在生成回复..."):
+                try:
+                    # 调用 Dify 工作流
+                    answer = run_dify_workflow(
+                        prompt, 
+                        st.session_state.username, 
+                        workflow_id
+                    )
+                    
+                except Exception as e:
+                    answer = f"AI 回复生成失败: {str(e)}"
 
-                # ✅ 关键：有些版本/部署下，结果在 data.outputs
-                payload = data.get("data") or data  # 兼容不同结构
-                outputs = payload.get("outputs") or {}
+                message_placeholder.markdown(f"**AI助手**: {answer}")
 
-                # 按你的 End 节点命名来取值（常见是 answer 或 text）
-                answer = (
-                        outputs.get("answer")
-                        or outputs.get("text")
-                        or outputs.get("result")
-                        or (payload.get("message") if isinstance(payload.get("message"), str) else None)
-                        or json.dumps(outputs, ensure_ascii=False)  # 兜底：把整个 outputs 打出来
-                        or "暂时无法生成回复"
-                )
-            except requests.RequestException as e:
-                answer = f"请求失败: {str(e)}"
-
-            message_placeholder.markdown(f"**AI助手**: {answer}")
-
-    # 添加AI回复
-    current_conv["history"].append({"role": "assistant", "content": answer})
+        # 添加AI回复到会话状态和数据库
+        current_conv["history"].append({"role": "assistant", "content": answer})
+        save_message_to_db(current_conv["id"], "assistant", answer)
+else:
+    st.info("请选择一个对话或创建新对话开始聊天")
