@@ -14,7 +14,7 @@
       "name": "通用助手",
       "description": "适用于一般性问答和对话",
       "api_base": "http://ai.wenhan.top:8080",
-      "api_key": "Bearer app-F4F2QM3rjs8DZgTtpIitoxlx"
+      "api_key": "app-bRFPPSnpYCDJGmOifPu5sZ45"
     },
     {
       "id": "workflow_2", 

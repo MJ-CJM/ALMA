@@ -111,14 +111,18 @@ elif current_page == "files":
                     with st.container():
                         col1, col2, col3, col4 = st.columns([3, 2, 1, 1])
                         
+                        # 获取用户名
+                        user = db_manager.get_user_by_id(file_info.user_id)
+                        username = user.username if user else f"用户{file_info.user_id}"
+                        
                         with col1:
-                            st.write(f"**文件名**: {file_info['filename']}")
-                            st.write(f"**上传用户**: {file_info['username']}")
-                            st.write(f"**上传时间**: {file_info['upload_at'].strftime('%Y-%m-%d %H:%M')}")
+                            st.write(f"**文件名**: {file_info.filename}")
+                            st.write(f"**上传用户**: {username}")
+                            st.write(f"**上传时间**: {file_info.upload_at.strftime('%Y-%m-%d %H:%M')}")
                         
                         with col2:
                             # 文件信息
-                            file_path = file_info['filepath']
+                            file_path = file_info.filepath
                             if os.path.exists(file_path):
                                 file_size = os.path.getsize(file_path)
                                 st.write(f"**文件大小**: {file_size / 1024:.1f} KB")
@@ -134,8 +138,8 @@ elif current_page == "files":
                                 st.download_button(
                                     "📥 下载",
                                     file_data,
-                                    file_info['filename'],
-                                    key=f"download_{file_info['id']}"
+                                    file_info.filename,
+                                    key=f"download_{file_info.id}"
                                 )
                             else:
                                 st.error("文件不存在")
@@ -145,16 +149,16 @@ elif current_page == "files":
                             col_approve, col_reject = st.columns(2)
                             
                             with col_approve:
-                                if st.button("✅ 批准", key=f"approve_{file_info['id']}"):
-                                    if db_manager.update_file_status(file_info['id'], 'approved'):
+                                if st.button("✅ 批准", key=f"approve_{file_info.id}"):
+                                    if db_manager.update_file_status(file_info.id, 'approved'):
                                         st.success("文件已批准")
                                         st.rerun()
                                     else:
                                         st.error("操作失败")
                             
                             with col_reject:
-                                if st.button("❌ 拒绝", key=f"reject_{file_info['id']}"):
-                                    if db_manager.update_file_status(file_info['id'], 'rejected'):
+                                if st.button("❌ 拒绝", key=f"reject_{file_info.id}"):
+                                    if db_manager.update_file_status(file_info.id, 'rejected'):
                                         st.success("文件已拒绝")
                                         st.rerun()
                                     else:
@@ -198,17 +202,17 @@ elif current_page == "invite_codes":
                         col_name, col_usage, col_status = st.columns([2, 1, 1])
                         
                         with col_name:
-                            st.write(f"**{code_info['code']}**")
-                            if code_info['description']:
-                                st.caption(code_info['description'])
+                            st.write(f"**{code_info.code}**")
+                            if code_info.description:
+                                st.caption(code_info.description)
                         
                         with col_usage:
-                            usage = f"{code_info['used_count']}/{code_info['max_uses']}"
+                            usage = f"{code_info.used_count}/{code_info.max_uses}"
                             st.write(f"使用: {usage}")
                         
                         with col_status:
-                            status_emoji = "✅" if code_info['status'] == 'active' else "❌"
-                            st.write(f"{status_emoji} {code_info['status']}")
+                            status_emoji = "✅" if code_info.status == 'active' else "❌"
+                            st.write(f"{status_emoji} {code_info.status}")
                         
                         st.divider()
                         

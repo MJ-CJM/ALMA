@@ -71,17 +71,17 @@ def load_user_conversations():
             st.session_state.conversations = {}
             for conv in conversations:
                 # 加载对话消息
-                messages = db_manager.load_conversation_messages(conv['id'])
+                messages = db_manager.load_conversation_messages(conv.id)
                 message_list = []
                 for msg in messages:
                     message_list.append({
-                        "role": msg['role'],
-                        "content": msg['content']
+                        "role": msg.role,
+                        "content": msg.content
                     })
                 
-                st.session_state.conversations[conv['conversation_name']] = {
-                    "id": conv['id'],
-                    "workflow_id": conv['workflow_id'],
+                st.session_state.conversations[conv.conversation_name] = {
+                    "id": conv.id,
+                    "workflow_id": conv.workflow_id,
                     "history": message_list
                 }
             
@@ -93,7 +93,8 @@ def load_user_conversations():
             workflows = get_workflow_list()
             if workflows:
                 default_workflow = workflows[0]['id']
-                create_new_conversation("新对话 1", default_workflow)
+                if create_new_conversation("新对话 1", default_workflow):
+                    st.session_state.current_conversation = "新对话 1"
         
         st.session_state.conversations_loaded = True
         
@@ -115,6 +116,9 @@ def create_new_conversation(name: str, workflow_id: str):
                 "workflow_id": workflow_id,
                 "history": [{"role": "assistant", "content": "让我们开始聊天吧！👇"}]
             }
+            
+            # 设置当前对话
+            st.session_state.current_conversation = name
             
             return True
         return False
@@ -214,7 +218,7 @@ with st.sidebar:
                     'rejected': '已拒绝'
                 }
                 
-                st.write(f"{status_emoji.get(file_info['status'], '❓')} {file_info['filename']} - {status_text.get(file_info['status'], '未知')}")
+                st.write(f"{status_emoji.get(file_info.status, '❓')} {file_info.filename} - {status_text.get(file_info.status, '未知')}")
     except Exception as e:
         st.error(f"加载文件列表失败: {e}")
 

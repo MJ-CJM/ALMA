@@ -151,6 +151,15 @@ class DatabaseManager:
             print(f"获取用户信息失败: {e}")
             return None
     
+    def get_user_by_id(self, user_id: int) -> Optional[User]:
+        """根据用户ID获取用户信息"""
+        try:
+            with self.get_session() as session:
+                return session.get(User, user_id)
+        except Exception as e:
+            print(f"获取用户信息失败: {e}")
+            return None
+    
     def verify_password(self, password: str, password_hash: str) -> bool:
         """验证密码（明文比较）"""
         try:
