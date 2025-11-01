@@ -40,10 +40,18 @@ class AuthManager:
                 return False
             
             if self.db.verify_password(password, user.password_hash):
+                # 重置对话加载标志，确保重新加载对话
+                if "conversations_loaded" in st.session_state:
+                    del st.session_state.conversations_loaded
+                if "conversations_loaded_user_id" in st.session_state:
+                    del st.session_state.conversations_loaded_user_id
+                
                 # 设置会话状态
                 st.session_state.user_id = user.id
                 st.session_state.username = user.username
                 st.session_state.login_time = datetime.now()
+                # 更新最后登录时间
+                self.db.update_user_last_login(user.id)
                 return True
             
             return False
@@ -75,7 +83,7 @@ class AuthManager:
         keys_to_remove = [
             "user_id", "username", "login_time", "conversations", 
             "current_conversation", "conversation_counter", "rename_mode",
-            "user_avatar", "user_name"
+            "user_avatar", "user_name", "conversations_loaded"
         ]
         
         for key in keys_to_remove:
@@ -90,6 +98,20 @@ class AuthManager:
                 <h3>请登录以继续</h3>
             </div>
         """, unsafe_allow_html=True)
+        
+        # 选择登录类型：用户或管理员
+        login_type = st.radio(
+            "选择登录类型",
+            ["👤 用户登录", "🔧 管理员登录"],
+            horizontal=True,
+            key="login_type_selector"
+        )
+        
+        st.divider()
+        
+        # 如果是管理员登录，显示管理员登录表单
+        if "管理员" in login_type:
+            return self.show_admin_login_unified()
         
         # 创建标签页
         tab1, tab2 = st.tabs(["登录", "注册"])
@@ -212,6 +234,44 @@ class AuthManager:
             st.rerun()
         
         st.divider()
+    
+    def show_admin_login_unified(self) -> bool:
+        """统一登录页面中的管理员登录表单"""
+        with st.form("admin_login_form_unified"):
+            st.subheader("🔧 管理员登录")
+            
+            admin_password = st.text_input(
+                "管理员密码",
+                type="password",
+                placeholder="请输入管理员密码",
+                help="管理员密码在 config.json 中配置"
+            )
+            
+            submit_button = st.form_submit_button(
+                "登录管理后台",
+                use_container_width=True,
+                type="primary"
+            )
+            
+            if submit_button:
+                if admin_password:
+                    # 从配置文件读取管理员密码
+                    try:
+                        with open(self.db.config_file, 'r', encoding='utf-8') as f:
+                            config = json.load(f)
+                        
+                        if admin_password == config['admin']['password']:
+                            st.session_state.is_admin = True
+                            st.success("管理员登录成功！正在跳转...")
+                            st.rerun()
+                        else:
+                            st.error("管理员密码错误")
+                    except Exception as e:
+                        st.error(f"登录失败: {e}")
+                else:
+                    st.warning("请输入管理员密码")
+        
+        return False
 
 def require_auth(auth_manager: AuthManager) -> bool:
     """
@@ -272,3 +332,20 @@ def require_admin_auth() -> bool:
         show_admin_login()
         return False
     return True
+
+def require_unified_auth(auth_manager: AuthManager) -> tuple[bool, bool]:
+    """
+    统一认证检查
+    返回: (是否已认证, 是否为管理员)
+    如果未登录，会自动显示登录页面
+    """
+    # 检查是否为管理员
+    if "is_admin" in st.session_state and st.session_state.is_admin:
+        return True, True
+    
+    # 检查是否为普通用户
+    if auth_manager.is_logged_in():
+        return True, False
+    
+    # 未登录时，登录页面会在调用处显示，这里只返回状态
+    return False, False

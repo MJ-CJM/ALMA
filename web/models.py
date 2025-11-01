@@ -3,8 +3,8 @@ SQLModel 数据模型定义
 最简化的 ORM 实现
 """
 
-from sqlmodel import SQLModel, Field, create_engine, Session, select
-from typing import Optional, List
+from sqlmodel import SQLModel, Field, create_engine, Session, select, or_
+from typing import Optional, List, Dict
 from datetime import datetime
 import json
 
@@ -17,6 +17,7 @@ class User(SQLModel, table=True, extend_existing=True):
     password_hash: str = Field(max_length=255)
     invite_code: str = Field(max_length=20)
     created_at: datetime = Field(default_factory=datetime.now)
+    last_login: Optional[datetime] = Field(default=None)  # 最后登录时间
 
 class InviteCode(SQLModel, table=True, extend_existing=True):
     """邀请码表"""
@@ -55,6 +56,26 @@ class UploadedFile(SQLModel, table=True, extend_existing=True):
     status: str = Field(default="pending", max_length=20)  # pending, approved, rejected
     upload_at: datetime = Field(default_factory=datetime.now)
     reviewed_at: Optional[datetime] = Field(default=None)
+
+class Workflow(SQLModel, table=True, extend_existing=True):
+    """工作流配置表"""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    workflow_id: str = Field(unique=True, index=True, max_length=50)  # 唯一标识符
+    name: str = Field(max_length=100)
+    description: str = Field(default="", max_length=500)
+    api_base: str = Field(max_length=500)
+    api_key: str = Field(max_length=500)
+    status: str = Field(default="active", max_length=20)  # active, inactive
+    is_global: bool = Field(default=True)  # 是否全局可见
+    created_at: datetime = Field(default_factory=datetime.now)
+    updated_at: datetime = Field(default_factory=datetime.now)
+
+class WorkflowUserPermission(SQLModel, table=True, extend_existing=True):
+    """工作流用户权限表（白名单）"""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    workflow_id: int = Field(foreign_key="workflow.id")
+    user_id: int = Field(foreign_key="user.id")
+    created_at: datetime = Field(default_factory=datetime.now)
 
 # ==================== 数据库管理类 ====================
 
@@ -269,15 +290,14 @@ class DatabaseManager:
             return None
     
     def load_user_conversations(self, user_id: int) -> List[Conversation]:
-        """加载用户的对话列表（最近30天）"""
+        """加载用户的对话列表（不限制时间，按更新时间排序）"""
         try:
             with self.get_session() as session:
-                cutoff_date = datetime.now() - timedelta(days=self.config['conversation']['retention_days'])
-                
+                # 移除时间限制，加载所有对话
+                # 如果需要限制，可以使用 retention_days，但这里改为加载所有对话
                 return session.exec(
                     select(Conversation)
                     .where(Conversation.user_id == user_id)
-                    .where(Conversation.created_at >= cutoff_date)
                     .order_by(Conversation.updated_at.desc())
                 ).all()
         except Exception as e:
@@ -325,10 +345,13 @@ class DatabaseManager:
         """删除对话（包括所有消息）"""
         try:
             with self.get_session() as session:
-                # 先删除所有消息
-                session.exec(
+                # 先获取并删除所有消息
+                messages = session.exec(
                     select(Message).where(Message.conversation_id == conversation_id)
-                ).delete()
+                ).all()
+                
+                for msg in messages:
+                    session.delete(msg)
                 
                 # 再删除对话
                 conversation = session.get(Conversation, conversation_id)
@@ -348,6 +371,16 @@ class DatabaseManager:
         """保存上传文件记录"""
         try:
             with self.get_session() as session:
+                # 兜底：避免重复插入相同待审批记录（同用户、同文件名、同路径且未审核）
+                existing = session.exec(
+                    select(UploadedFile)
+                    .where(UploadedFile.user_id == user_id)
+                    .where(UploadedFile.filename == filename)
+                    .where(UploadedFile.filepath == filepath)
+                    .where(UploadedFile.status == 'pending')
+                ).first()
+                if existing:
+                    return existing.id
                 uploaded_file = UploadedFile(
                     user_id=user_id,
                     filename=filename,
@@ -402,6 +435,419 @@ class DatabaseManager:
         except Exception as e:
             print(f"更新文件状态失败: {e}")
             return False
+    
+    # ==================== 工作流管理 ====================
+    
+    def create_workflow(self, workflow_id: str, name: str, description: str, api_base: str, 
+                       api_key: str, status: str = "active", is_global: bool = True) -> Optional[int]:
+        """创建工作流"""
+        try:
+            with self.get_session() as session:
+                # 检查 workflow_id 是否已存在
+                existing = session.exec(
+                    select(Workflow).where(Workflow.workflow_id == workflow_id)
+                ).first()
+                if existing:
+                    return None
+                
+                workflow = Workflow(
+                    workflow_id=workflow_id,
+                    name=name,
+                    description=description,
+                    api_base=api_base,
+                    api_key=api_key,
+                    status=status,
+                    is_global=is_global
+                )
+                session.add(workflow)
+                session.commit()
+                session.refresh(workflow)
+                return workflow.id
+        except Exception as e:
+            print(f"创建工作流失败: {e}")
+            return None
+    
+    def update_workflow(self, workflow_db_id: int, workflow_id: str = None, name: str = None, 
+                       description: str = None, api_base: str = None, api_key: str = None,
+                       status: str = None, is_global: bool = None) -> bool:
+        """更新工作流"""
+        try:
+            with self.get_session() as session:
+                workflow = session.get(Workflow, workflow_db_id)
+                if not workflow:
+                    return False
+                
+                # 如果更新 workflow_id，检查是否冲突
+                if workflow_id and workflow_id != workflow.workflow_id:
+                    existing = session.exec(
+                        select(Workflow).where(Workflow.workflow_id == workflow_id)
+                    ).first()
+                    if existing:
+                        return False
+                    workflow.workflow_id = workflow_id
+                
+                if name is not None:
+                    workflow.name = name
+                if description is not None:
+                    workflow.description = description
+                if api_base is not None:
+                    workflow.api_base = api_base
+                if api_key is not None:
+                    workflow.api_key = api_key
+                if status is not None:
+                    workflow.status = status
+                if is_global is not None:
+                    workflow.is_global = is_global
+                
+                workflow.updated_at = datetime.now()
+                session.add(workflow)
+                session.commit()
+                return True
+        except Exception as e:
+            print(f"更新工作流失败: {e}")
+            return False
+    
+    def delete_workflow(self, workflow_db_id: int) -> bool:
+        """删除工作流（同时删除相关权限）"""
+        try:
+            with self.get_session() as session:
+                workflow = session.get(Workflow, workflow_db_id)
+                if not workflow:
+                    return False
+                
+                # 检查是否有对话在使用此工作流
+                conversations = session.exec(
+                    select(Conversation).where(Conversation.workflow_id == workflow.workflow_id)
+                ).all()
+                if conversations:
+                    return False  # 有对话在使用，不允许删除
+                
+                # 删除相关权限
+                permissions = session.exec(
+                    select(WorkflowUserPermission).where(WorkflowUserPermission.workflow_id == workflow_db_id)
+                ).all()
+                for perm in permissions:
+                    session.delete(perm)
+                
+                # 删除工作流
+                session.delete(workflow)
+                session.commit()
+                return True
+        except Exception as e:
+            print(f"删除工作流失败: {e}")
+            return False
+    
+    def get_all_workflows(self) -> List[Workflow]:
+        """获取所有工作流（管理员用）"""
+        try:
+            with self.get_session() as session:
+                return session.exec(
+                    select(Workflow).order_by(Workflow.created_at.desc())
+                ).all()
+        except Exception as e:
+            print(f"获取工作流列表失败: {e}")
+            return []
+    
+    def get_workflow_by_db_id(self, workflow_db_id: int) -> Optional[Workflow]:
+        """根据数据库ID获取工作流"""
+        try:
+            with self.get_session() as session:
+                return session.get(Workflow, workflow_db_id)
+        except Exception as e:
+            print(f"获取工作流失败: {e}")
+            return None
+    
+    def get_workflow_by_workflow_id(self, workflow_id: str) -> Optional[Workflow]:
+        """根据 workflow_id 获取工作流"""
+        try:
+            with self.get_session() as session:
+                return session.exec(
+                    select(Workflow).where(Workflow.workflow_id == workflow_id)
+                ).first()
+        except Exception as e:
+            print(f"获取工作流失败: {e}")
+            return None
+    
+    def get_user_accessible_workflows(self, user_id: int) -> List[Workflow]:
+        """获取用户可见的工作流（全局可见的 + 在白名单中的）"""
+        try:
+            with self.get_session() as session:
+                # 获取全局可见的启用工作流
+                global_workflows = session.exec(
+                    select(Workflow)
+                    .where(Workflow.is_global == True)
+                    .where(Workflow.status == "active")
+                ).all()
+                
+                # 获取用户在白名单中的工作流
+                user_permissions = session.exec(
+                    select(WorkflowUserPermission)
+                    .where(WorkflowUserPermission.user_id == user_id)
+                ).all()
+                
+                workflow_ids = {perm.workflow_id for perm in user_permissions}
+                private_workflows = []
+                if workflow_ids:
+                    # SQLModel 的 in_ 操作需要这样写
+                    conditions = [Workflow.id == wid for wid in workflow_ids]
+                    if conditions:
+                        private_workflows = session.exec(
+                            select(Workflow)
+                            .where(or_(*conditions))
+                            .where(Workflow.status == "active")
+                        ).all()
+                
+                # 合并并去重
+                all_workflows = {w.id: w for w in global_workflows}
+                for w in private_workflows:
+                    all_workflows[w.id] = w
+                
+                return list(all_workflows.values())
+        except Exception as e:
+            print(f"获取用户可见工作流失败: {e}")
+            return []
+    
+    def set_workflow_users(self, workflow_db_id: int, user_ids: List[int]) -> bool:
+        """设置工作流的用户白名单"""
+        try:
+            with self.get_session() as session:
+                workflow = session.get(Workflow, workflow_db_id)
+                if not workflow:
+                    return False
+                
+                # 删除现有权限
+                existing_permissions = session.exec(
+                    select(WorkflowUserPermission).where(WorkflowUserPermission.workflow_id == workflow_db_id)
+                ).all()
+                for perm in existing_permissions:
+                    session.delete(perm)
+                
+                # 添加新权限
+                for user_id in user_ids:
+                    permission = WorkflowUserPermission(
+                        workflow_id=workflow_db_id,
+                        user_id=user_id
+                    )
+                    session.add(permission)
+                
+                session.commit()
+                return True
+        except Exception as e:
+            print(f"设置工作流用户权限失败: {e}")
+            return False
+    
+    def get_workflow_users(self, workflow_db_id: int) -> List[int]:
+        """获取工作流的用户白名单"""
+        try:
+            with self.get_session() as session:
+                permissions = session.exec(
+                    select(WorkflowUserPermission).where(WorkflowUserPermission.workflow_id == workflow_db_id)
+                ).all()
+                return [perm.user_id for perm in permissions]
+        except Exception as e:
+            print(f"获取工作流用户列表失败: {e}")
+            return []
+    
+    def import_workflows_from_config(self, is_global: bool = True) -> int:
+        """从 config.json 导入工作流到数据库"""
+        try:
+            workflows_config = self.config.get('workflows', [])
+            imported_count = 0
+            
+            for wf_config in workflows_config:
+                workflow_id = wf_config.get('id')
+                if not workflow_id:
+                    continue
+                
+                # 检查是否已存在
+                existing = self.get_workflow_by_workflow_id(workflow_id)
+                if existing:
+                    continue
+                
+                # 创建新工作流
+                result = self.create_workflow(
+                    workflow_id=workflow_id,
+                    name=wf_config.get('name', ''),
+                    description=wf_config.get('description', ''),
+                    api_base=wf_config.get('api_base', ''),
+                    api_key=wf_config.get('api_key', ''),
+                    status='active',
+                    is_global=is_global
+                )
+                
+                if result:
+                    imported_count += 1
+            
+            return imported_count
+        except Exception as e:
+            print(f"导入工作流失败: {e}")
+            return 0
+    
+    def get_all_users(self) -> List[User]:
+        """获取所有用户（用于权限管理）"""
+        try:
+            with self.get_session() as session:
+                return session.exec(
+                    select(User).order_by(User.created_at.desc())
+                ).all()
+        except Exception as e:
+            print(f"获取用户列表失败: {e}")
+            return []
+    
+    # ==================== 用户管理 ====================
+    
+    def update_user_last_login(self, user_id: int) -> bool:
+        """更新用户最后登录时间"""
+        try:
+            with self.get_session() as session:
+                user = session.get(User, user_id)
+                if user:
+                    user.last_login = datetime.now()
+                    session.add(user)
+                    session.commit()
+                    return True
+                return False
+        except Exception as e:
+            print(f"更新用户登录时间失败: {e}")
+            return False
+    
+    def get_user_statistics(self, user_id: int) -> Dict:
+        """获取用户统计数据"""
+        try:
+            with self.get_session() as session:
+                # 对话数量
+                conversations = session.exec(
+                    select(Conversation).where(Conversation.user_id == user_id)
+                ).all()
+                conversation_count = len(conversations)
+                
+                # 文件数量
+                files = session.exec(
+                    select(UploadedFile).where(UploadedFile.user_id == user_id)
+                ).all()
+                file_count = len(files)
+                
+                # 最后活动时间（最近对话更新时间或文件上传时间）
+                last_activity = None
+                if conversations:
+                    last_conv_time = max([c.updated_at for c in conversations])
+                    if last_activity is None or last_conv_time > last_activity:
+                        last_activity = last_conv_time
+                
+                if files:
+                    last_file_time = max([f.upload_at for f in files])
+                    if last_activity is None or last_file_time > last_activity:
+                        last_activity = last_file_time
+                
+                return {
+                    "conversation_count": conversation_count,
+                    "file_count": file_count,
+                    "last_activity": last_activity
+                }
+        except Exception as e:
+            print(f"获取用户统计失败: {e}")
+            return {
+                "conversation_count": 0,
+                "file_count": 0,
+                "last_activity": None
+            }
+    
+    def get_all_users_with_stats(self) -> List[Dict]:
+        """获取所有用户及其统计数据"""
+        try:
+            users = self.get_all_users()
+            result = []
+            for user in users:
+                stats = self.get_user_statistics(user.id)
+                result.append({
+                    "user": user,
+                    "stats": stats
+                })
+            return result
+        except Exception as e:
+            print(f"获取用户统计列表失败: {e}")
+            return []
+    
+    def reset_user_password(self, user_id: int, new_password: str) -> bool:
+        """重置用户密码"""
+        try:
+            with self.get_session() as session:
+                user = session.get(User, user_id)
+                if user:
+                    user.password_hash = new_password
+                    session.add(user)
+                    session.commit()
+                    return True
+                return False
+        except Exception as e:
+            print(f"重置密码失败: {e}")
+            return False
+    
+    def delete_user(self, user_id: int) -> tuple[bool, str]:
+        """
+        删除用户（硬删除）
+        返回: (是否成功, 错误信息)
+        """
+        try:
+            with self.get_session() as session:
+                user = session.get(User, user_id)
+                if not user:
+                    return False, "用户不存在"
+                
+                # 获取关联数据统计
+                conversations = session.exec(
+                    select(Conversation).where(Conversation.user_id == user_id)
+                ).all()
+                files = session.exec(
+                    select(UploadedFile).where(UploadedFile.user_id == user_id)
+                ).all()
+                
+                # 删除所有对话的消息
+                for conv in conversations:
+                    messages = session.exec(
+                        select(Message).where(Message.conversation_id == conv.id)
+                    ).all()
+                    for msg in messages:
+                        session.delete(msg)
+                    session.commit()  # 先提交消息删除
+                
+                # 删除所有对话
+                for conv in conversations:
+                    session.delete(conv)
+                
+                # 删除所有文件记录
+                for file_record in files:
+                    session.delete(file_record)
+                
+                # 删除工作流权限（如果表存在）
+                try:
+                    permissions = session.exec(
+                        select(WorkflowUserPermission).where(WorkflowUserPermission.user_id == user_id)
+                    ).all()
+                    for perm in permissions:
+                        session.delete(perm)
+                except Exception as perm_error:
+                    # 如果表不存在，跳过权限删除（表可能还未创建）
+                    print(f"警告: 无法删除工作流权限（表可能不存在）: {perm_error}")
+                
+                # 删除用户
+                session.delete(user)
+                session.commit()
+                
+                return True, f"用户已删除（包括 {len(conversations)} 个对话、{len(files)} 个文件）"
+        except Exception as e:
+            print(f"删除用户失败: {e}")
+            return False, f"删除失败: {str(e)}"
+    
+    def get_total_conversation_count(self) -> int:
+        """获取总对话数"""
+        try:
+            with self.get_session() as session:
+                conversations = session.exec(select(Conversation)).all()
+                return len(conversations)
+        except Exception as e:
+            print(f"获取对话总数失败: {e}")
+            return 0
 
 # 导入必要的模块
 from datetime import timedelta

@@ -16,75 +16,30 @@ def show_help():
     print("  python start.py [选项]")
     print("")
     print("选项:")
-    print("  -u, --user        启动用户前端 (端口 8501)")
-    print("  -m, --manager     启动管理员前端 (端口 8502)")
+    print("  -p, --port         指定端口号 (默认 8501)")
     print("  -i, --init         初始化数据库")
     print("  -h, --help         显示帮助信息")
     print("")
     print("示例:")
-    print("  python start.py -u          # 启动用户前端")
-    print("  python start.py -m          # 启动管理员前端")
-    print("  python start.py -i          # 初始化数据库")
-    print("  python start.py -u -m       # 同时启动用户和管理员前端")
+    print("  python start.py              # 启动统一应用 (端口 8501)")
+    print("  python start.py -p 8502       # 启动统一应用 (指定端口)")
+    print("  python start.py -i             # 初始化数据库")
+    print("")
+    print("说明:")
+    print("  现在只需要启动一个服务，登录时选择用户或管理员身份即可")
 
-def start_user_frontend():
-    """启动用户前端"""
-    print("🚀 启动用户前端...")
-    print("访问地址: http://localhost:8501")
-    os.system("streamlit run front.py --server.port 8501")
-
-def start_manager_frontend():
-    """启动管理员前端"""
-    print("🚀 启动管理员前端...")
-    print("访问地址: http://localhost:8502")
-    os.system("streamlit run manager_front.py --server.port 8502")
-
-def start_both_frontends():
-    """同时启动用户前端和管理员前端"""
-    import subprocess
-    import threading
-    import time
-    
-    print("🚀 同时启动用户前端和管理员前端...")
-    print("访问地址:")
-    print("  - 用户前端: http://localhost:8501")
-    print("  - 管理员前端: http://localhost:8502")
-    print("按 Ctrl+C 停止所有服务")
+def start_unified_app(port: int = 8501):
+    """启动统一应用（包含用户和管理员界面）"""
+    print("🚀 启动 ALMA AI 助手统一应用...")
     print("=" * 50)
-    
-    def run_user_frontend():
-        """运行用户前端"""
-        subprocess.run([
-            "streamlit", "run", "front.py", 
-            "--server.port", "8501",
-            "--server.headless", "true"
-        ])
-    
-    def run_manager_frontend():
-        """运行管理员前端"""
-        subprocess.run([
-            "streamlit", "run", "manager_front.py", 
-            "--server.port", "8502",
-            "--server.headless", "true"
-        ])
-    
-    try:
-        # 创建线程
-        user_thread = threading.Thread(target=run_user_frontend, daemon=True)
-        manager_thread = threading.Thread(target=run_manager_frontend, daemon=True)
-        
-        # 启动线程
-        user_thread.start()
-        time.sleep(2)  # 等待用户前端启动
-        manager_thread.start()
-        
-        # 等待线程完成
-        user_thread.join()
-        manager_thread.join()
-        
-    except KeyboardInterrupt:
-        print("\n🛑 正在停止服务...")
-        print("✅ 服务已停止")
+    print(f"访问地址: http://localhost:{port}")
+    print("")
+    print("使用说明:")
+    print("  - 登录时选择 '👤 用户登录' 进入用户界面")
+    print("  - 登录时选择 '🔧 管理员登录' 进入管理员界面")
+    print("  - 按 Ctrl+C 停止服务")
+    print("=" * 50)
+    os.system(f"streamlit run front.py --server.port {port}")
 
 def init_database():
     """初始化数据库"""
@@ -95,19 +50,18 @@ def interactive_mode():
     """交互模式"""
     print("🚀 ALMA AI 助手启动脚本")
     print("=" * 50)
-    print("请选择要启动的应用:")
-    print("1. 用户前端 (front.py)")
-    print("2. 管理员前端 (manager_front.py)")
-    print("3. 数据库初始化 (init_database_sqlmodel.py)")
+    print("请选择要执行的操作:")
+    print("1. 启动统一应用 (front.py)")
+    print("2. 数据库初始化 (init_database_sqlmodel.py)")
     print("=" * 50)
     
-    choice = input("请输入选择 (1-3): ").strip()
+    choice = input("请输入选择 (1-2): ").strip()
     
     if choice == "1":
-        start_user_frontend()
+        port_input = input("请输入端口号 (直接回车使用默认 8501): ").strip()
+        port = int(port_input) if port_input.isdigit() else 8501
+        start_unified_app(port)
     elif choice == "2":
-        start_manager_frontend()
-    elif choice == "3":
         init_database()
     else:
         print("无效选择，请重新运行脚本")
@@ -119,10 +73,8 @@ def main():
         add_help=False
     )
     
-    parser.add_argument('-u', '--user', action='store_true', 
-                       help='启动用户前端')
-    parser.add_argument('-m', '--manager', action='store_true', 
-                       help='启动管理员前端')
+    parser.add_argument('-p', '--port', type=int, default=8501,
+                       help='指定端口号 (默认 8501)')
     parser.add_argument('-i', '--init', action='store_true', 
                        help='初始化数据库')
     parser.add_argument('-h', '--help', action='store_true', 
@@ -143,14 +95,9 @@ def main():
     # 执行相应操作
     if args.init:
         init_database()
-    
-    # 如果同时指定了用户和管理员，则同时启动
-    if args.user and args.manager:
-        start_both_frontends()
-    elif args.user:
-        start_user_frontend()
-    elif args.manager:
-        start_manager_frontend()
+    else:
+        # 默认启动统一应用
+        start_unified_app(args.port)
 
 if __name__ == "__main__":
     main()
