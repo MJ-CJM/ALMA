@@ -6,6 +6,7 @@ SQLModel 数据模型定义
 from sqlmodel import SQLModel, Field, create_engine, Session, select, or_
 from typing import Optional, List, Dict
 from datetime import datetime
+from sqlalchemy import desc, asc
 import json
 
 # ==================== 数据模型 ====================
@@ -56,6 +57,17 @@ class UploadedFile(SQLModel, table=True, extend_existing=True):
     status: str = Field(default="pending", max_length=20)  # pending, approved, rejected
     upload_at: datetime = Field(default_factory=datetime.now)
     reviewed_at: Optional[datetime] = Field(default=None)
+
+# 新增小火人数据模型
+class FireCharacter(SQLModel, table=True, extend_existing=True):
+    """小火人角色表"""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="user.id", unique=True)
+    level: int = Field(default=1)  # 等级
+    experience: int = Field(default=0)  # 当前经验值
+    total_messages: int = Field(default=0)  # 总对话消息数
+    created_at: datetime = Field(default_factory=datetime.now)
+    updated_at: datetime = Field(default_factory=datetime.now)
 
 class Workflow(SQLModel, table=True, extend_existing=True):
     """工作流配置表"""
@@ -118,7 +130,8 @@ class DatabaseManager:
     
     def create_tables(self):
         """创建所有表"""
-        SQLModel.metadata.create_all(self.engine)
+        if self.engine:
+            SQLModel.metadata.create_all(self.engine)
     
     def get_session(self):
         """获取数据库会话"""
@@ -263,9 +276,9 @@ class DatabaseManager:
         """获取所有邀请码"""
         try:
             with self.get_session() as session:
-                return session.exec(
-                    select(InviteCode).order_by(InviteCode.created_at.desc())
-                ).all()
+                return list(session.exec(
+                    select(InviteCode).order_by(desc('created_at'))
+                ).all())
         except Exception as e:
             print(f"获取邀请码列表失败: {e}")
             return []
@@ -295,11 +308,11 @@ class DatabaseManager:
             with self.get_session() as session:
                 # 移除时间限制，加载所有对话
                 # 如果需要限制，可以使用 retention_days，但这里改为加载所有对话
-                return session.exec(
+                return list(session.exec(
                     select(Conversation)
                     .where(Conversation.user_id == user_id)
-                    .order_by(Conversation.updated_at.desc())
-                ).all()
+                    .order_by(desc('updated_at'))
+                ).all())
         except Exception as e:
             print(f"加载对话列表失败: {e}")
             return []
@@ -332,11 +345,11 @@ class DatabaseManager:
         """加载对话的所有消息"""
         try:
             with self.get_session() as session:
-                return session.exec(
+                return list(session.exec(
                     select(Message)
                     .where(Message.conversation_id == conversation_id)
-                    .order_by(Message.created_at.asc())
-                ).all()
+                    .order_by(asc('created_at'))
+                ).all())
         except Exception as e:
             print(f"加载对话消息失败: {e}")
             return []
@@ -398,11 +411,11 @@ class DatabaseManager:
         """获取用户上传的文件列表"""
         try:
             with self.get_session() as session:
-                return session.exec(
+                return list(session.exec(
                     select(UploadedFile)
                     .where(UploadedFile.user_id == user_id)
-                    .order_by(UploadedFile.upload_at.desc())
-                ).all()
+                    .order_by(desc('upload_at'))
+                ).all())
         except Exception as e:
             print(f"获取用户文件列表失败: {e}")
             return []
@@ -411,11 +424,11 @@ class DatabaseManager:
         """获取所有待审批的文件"""
         try:
             with self.get_session() as session:
-                return session.exec(
+                return list(session.exec(
                     select(UploadedFile)
                     .where(UploadedFile.status == 'pending')
-                    .order_by(UploadedFile.upload_at.asc())
-                ).all()
+                    .order_by(asc('upload_at'))
+                ).all())
         except Exception as e:
             print(f"获取待审批文件失败: {e}")
             return []
@@ -467,9 +480,9 @@ class DatabaseManager:
             print(f"创建工作流失败: {e}")
             return None
     
-    def update_workflow(self, workflow_db_id: int, workflow_id: str = None, name: str = None, 
-                       description: str = None, api_base: str = None, api_key: str = None,
-                       status: str = None, is_global: bool = None) -> bool:
+    def update_workflow(self, workflow_db_id: int, workflow_id: Optional[str] = None, name: Optional[str] = None, 
+                       description: Optional[str] = None, api_base: Optional[str] = None, api_key: Optional[str] = None,
+                       status: Optional[str] = None, is_global: Optional[bool] = None) -> bool:
         """更新工作流"""
         try:
             with self.get_session() as session:
@@ -541,9 +554,9 @@ class DatabaseManager:
         """获取所有工作流（管理员用）"""
         try:
             with self.get_session() as session:
-                return session.exec(
-                    select(Workflow).order_by(Workflow.created_at.desc())
-                ).all()
+                return list(session.exec(
+                    select(Workflow).order_by(desc('created_at'))
+                ).all())
         except Exception as e:
             print(f"获取工作流列表失败: {e}")
             return []
@@ -687,9 +700,9 @@ class DatabaseManager:
         """获取所有用户（用于权限管理）"""
         try:
             with self.get_session() as session:
-                return session.exec(
-                    select(User).order_by(User.created_at.desc())
-                ).all()
+                return list(session.exec(
+                    select(User).order_by(desc('created_at'))
+                ).all())
         except Exception as e:
             print(f"获取用户列表失败: {e}")
             return []
@@ -758,7 +771,10 @@ class DatabaseManager:
             users = self.get_all_users()
             result = []
             for user in users:
-                stats = self.get_user_statistics(user.id)
+                if user.id is not None:
+                    stats = self.get_user_statistics(user.id)
+                else:
+                    stats = {"conversation_count": 0, "file_count": 0, "last_activity": None}
                 result.append({
                     "user": user,
                     "stats": stats
@@ -848,6 +864,60 @@ class DatabaseManager:
         except Exception as e:
             print(f"获取对话总数失败: {e}")
             return 0
+    
+    def get_or_create_fire_character(self, user_id: int) -> Optional[FireCharacter]:
+        """获取或创建用户的小火人角色"""
+        try:
+            with self.get_session() as session:
+                # 查找现有的小火人角色
+                fire_char = session.exec(
+                    select(FireCharacter).where(FireCharacter.user_id == user_id)
+                ).first()
+                
+                # 如果不存在，则创建一个新的
+                if not fire_char:
+                    fire_char = FireCharacter(user_id=user_id)
+                    session.add(fire_char)
+                    session.commit()
+                    session.refresh(fire_char)
+                
+                return fire_char
+        except Exception as e:
+            print(f"获取或创建小火人角色失败: {e}")
+            return None
+    
+    def update_fire_character_exp(self, user_id: int, exp_gained: int = 1) -> Optional[FireCharacter]:
+        """更新小火人经验值"""
+        try:
+            with self.get_session() as session:
+                # 获取用户的小火人角色
+                fire_char = session.exec(
+                    select(FireCharacter).where(FireCharacter.user_id == user_id)
+                ).first()
+                
+                # 如果不存在，则创建一个新的
+                if not fire_char:
+                    fire_char = FireCharacter(user_id=user_id)
+                    session.add(fire_char)
+                
+                # 更新经验值和消息数
+                fire_char.experience += exp_gained
+                fire_char.total_messages += 1
+                
+                # 检查是否升级（每10点经验升一级）
+                new_level = fire_char.experience // 10 + 1
+                if new_level > fire_char.level:
+                    fire_char.level = new_level
+                
+                fire_char.updated_at = datetime.now()
+                session.add(fire_char)
+                session.commit()
+                session.refresh(fire_char)
+                
+                return fire_char
+        except Exception as e:
+            print(f"更新小火人经验值失败: {e}")
+            return None
 
 # 导入必要的模块
 from datetime import timedelta

@@ -146,7 +146,7 @@ if is_admin:
                                 
                                 with col_approve:
                                     if st.button("✅ 批准", key=f"approve_{file_info.id}"):
-                                        if db_manager.update_file_status(file_info.id, 'approved'):
+                                        if file_info.id is not None and db_manager.update_file_status(file_info.id, 'approved'):
                                             st.success("文件已批准")
                                             st.rerun()
                                         else:
@@ -154,7 +154,7 @@ if is_admin:
                                 
                                 with col_reject:
                                     if st.button("❌ 拒绝", key=f"reject_{file_info.id}"):
-                                        if db_manager.update_file_status(file_info.id, 'rejected'):
+                                        if file_info.id is not None and db_manager.update_file_status(file_info.id, 'rejected'):
                                             st.success("文件已拒绝")
                                             st.rerun()
                                         else:
@@ -506,7 +506,7 @@ if is_admin:
                             
                             with col5:
                                 if st.button("🗑️ 删除", key=f"del_wf_{workflow.id}", use_container_width=True):
-                                    if db_manager.delete_workflow(workflow.id):
+                                    if workflow.id is not None and db_manager.delete_workflow(workflow.id):
                                         st.success(f"工作流 {workflow.name} 已删除")
                                         st.rerun()
                                     else:
@@ -531,7 +531,7 @@ if is_admin:
                                     with col_submit:
                                         if st.form_submit_button("保存"):
                                             if db_manager.update_workflow(
-                                                workflow.id,
+                                                workflow.id if workflow.id is not None else 0,
                                                 workflow_id=new_workflow_id,
                                                 name=new_name,
                                                 description=new_description,
@@ -556,7 +556,10 @@ if is_admin:
                                 st.subheader(f"管理权限: {workflow.name}")
                                 
                                 all_users = db_manager.get_all_users()
-                                current_user_ids = set(db_manager.get_workflow_users(workflow.id))
+                                if workflow.id is not None:
+                                    current_user_ids = set(db_manager.get_workflow_users(workflow.id))
+                                else:
+                                    current_user_ids = set()
                                 
                                 selected_users = st.multiselect(
                                     "选择可见用户",
@@ -565,12 +568,12 @@ if is_admin:
                                     format_func=lambda x: x[1]
                                 )
                                 
-                                user_ids = [uid for uid, _ in selected_users]
+                                user_ids = [uid for uid, _ in selected_users if uid is not None]
                                 
                                 col_save, col_cancel = st.columns(2)
                                 with col_save:
                                     if st.button("保存权限", key=f"save_perms_{workflow.id}"):
-                                        if db_manager.set_workflow_users(workflow.id, user_ids):
+                                        if workflow.id is not None and db_manager.set_workflow_users(workflow.id, user_ids):
                                             st.success("权限已更新")
                                             st.session_state[f"manage_perms_{workflow.id}"] = False
                                             st.rerun()
@@ -699,6 +702,10 @@ DEFAULT_AVATAR = "🙋‍♂️"
 DEFAULT_NAME = "用户"
 AVATAR_OPTIONS = ["👤", "😊", "🎮", "👻", "🐱", "🐶", "🦊", "🐼", "🐨", "🦁", "🐯", "🦋", "🐵"]
 
+# ==================== 小火人相关函数 ====================
+
+
+
 # -------------------------
 # 初始化会话状态
 # -------------------------
@@ -740,7 +747,10 @@ def load_user_conversations():
             
             for conv in conversations:
                 # 加载对话消息
-                messages = db_manager.load_conversation_messages(conv.id)
+                if conv.id is not None:
+                    messages = db_manager.load_conversation_messages(conv.id)
+                else:
+                    messages = []
                 message_list = []
                 for msg in messages:
                     message_list.append({
@@ -824,6 +834,17 @@ def save_message_to_db(conversation_id: int, role: str, content: str):
     """保存消息到数据库"""
     try:
         db_manager.save_message(conversation_id, role, content)
+        
+        # 如果是用户发送的消息，增加小火人经验
+        if role == "user":
+            try:
+                # 更新小火人经验值
+                fire_char = db_manager.update_fire_character_exp(st.session_state.user_id, 1)
+                # 如果升级了，显示提示
+                if fire_char and fire_char.level > (fire_char.level - 1):
+                    st.success(f"🔥 小火人升级了！现在是 {fire_char.level} 级")
+            except Exception as e:
+                print(f"更新小火人经验失败: {e}")
     except Exception as e:
         st.error(f"保存消息失败: {e}")
 
@@ -836,6 +857,31 @@ load_user_conversations()
 with st.sidebar:
     # 显示用户信息和登出按钮
     auth_manager.show_user_info_and_logout()
+    
+    # 显示小火人信息
+    try:
+        fire_char = db_manager.get_or_create_fire_character(st.session_state.user_id)
+        # 显示小火人信息
+        if fire_char:
+            # 计算下一等级所需经验
+            next_level_exp = fire_char.level * 10
+            current_level_exp = (fire_char.level - 1) * 10
+            exp_in_level = fire_char.experience - current_level_exp
+            exp_needed = next_level_exp - current_level_exp
+            title = f"🔥 小火人 (Lv.{fire_char.level})"
+            exp_text = f"经验: {exp_in_level}/{exp_needed}"
+        else:
+            title = "🔥 小火人 (Lv.1)"
+            exp_text = "经验: 0/10"
+        st.markdown(f"""
+            <div style="background-color: #fff3cd; border: 1px solid #ffeaa7; border-radius: 10px; padding: 15px; margin-bottom: 20px;">
+                <h4 style="margin: 0 0 10px 0; color: #856404;">{title}</h4>
+                <p style="margin: 5px 0; font-size: 14px; color: #856404;">{exp_text}</p>
+                <p style="margin: 5px 0; font-size: 14px; color: #856404;">总消息数: {fire_char.total_messages if fire_char else 0}</p>
+            </div>
+        """, unsafe_allow_html=True)
+    except Exception as e:
+        st.warning("小火人信息加载失败")
     
     st.title("探索功能")
     st.divider()
@@ -1111,3 +1157,15 @@ if st.session_state.current_conversation:
         save_message_to_db(current_conv["id"], "assistant", answer)
 else:
     st.info("请选择一个对话或创建新对话开始聊天")
+
+# ==================== 小火人相关函数 ====================
+
+
+
+# 默认头像选项
+AVATAR_OPTIONS = ["🤖", "😀", "😎", "🥳", "😇", "🤠", "🥸", "🤓", "🧐", "🦄", "🐱", "🦊", "🐯", "🦁", "🐮", "🐷", "🐸", "🐵", "🐔", "🐧", "🦉", "🐢", "🐬", "🦈", "🦒", "🦋", "🌻", "🌲", "🌈", "🔥"]
+DEFAULT_AVATAR = "🤖"
+DEFAULT_NAME = "用户"
+
+# 最大对话数量
+MAX_CONVERSATIONS = 12
