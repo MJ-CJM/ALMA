@@ -5,9 +5,8 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="93bdfaca-df2a-411e-a906-600e74bedf22" name="更改" comment="">
-      <change beforePath="$PROJECT_DIR$/.idea/dataSources.local.xml" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/web/web/invite_codes.json" beforeDir="false" afterPath="$PROJECT_DIR$/web/web/invite_codes.json" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/web/front.py" beforeDir="false" afterPath="$PROJECT_DIR$/web/front.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/web/models.py" beforeDir="false" afterPath="$PROJECT_DIR$/web/models.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -46,36 +45,41 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent"><![CDATA[{
-  "keyToString": {
-    "ModuleVcsDetector.initialDetectionPerformed": "true",
-    "Python 测试.Python 测试 (rag_server.py 内).executor": "Run",
-    "Python 测试.Python 测试 (test_milvus_lite.py 内).executor": "Run",
-    "Python 测试.Python 测试 (test_rag_core.py 内).executor": "Run",
-    "Python 测试.Python 测试 (test_search.py 内).executor": "Run",
-    "Python 测试.test_milvus_lite.test_milvus_lite 的 Python 测试.executor": "Run",
-    "Python.front.executor": "Run",
-    "Python.prompt_demo.executor": "Run",
-    "Python.prompt_server.executor": "Run",
-    "Python.qwen3_embedding_demo.executor": "Run",
-    "Python.rag_demo.executor": "Run",
-    "Python.rag_server.executor": "Run",
-    "Python.rag_service.executor": "Run",
-    "Python.rag_service_xw.executor": "Run",
-    "RunOnceActivity.ShowReadmeOnStart": "true",
-    "RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252": "true",
-    "RunOnceActivity.git.unshallow": "true",
-    "git-widget-placeholder": "feat__webui",
-    "last_opened_file_path": "/Users/chenjiamin/python/ALMA",
-    "node.js.detected.package.eslint": "true",
-    "node.js.detected.package.tslint": "true",
-    "node.js.selected.package.eslint": "(autodetect)",
-    "node.js.selected.package.tslint": "(autodetect)",
-    "nodejs_package_manager_path": "npm",
-    "settings.editor.selected.configurable": "editor.preferences.fonts.default",
-    "vue.rearranger.settings.migration": "true"
+  <component name="PropertiesComponent">{
+  &quot;keyToString&quot;: {
+    &quot;ModuleVcsDetector.initialDetectionPerformed&quot;: &quot;true&quot;,
+    &quot;Python 测试.Python 测试 (rag_server.py 内).executor&quot;: &quot;Run&quot;,
+    &quot;Python 测试.Python 测试 (test_milvus_lite.py 内).executor&quot;: &quot;Run&quot;,
+    &quot;Python 测试.Python 测试 (test_rag_core.py 内).executor&quot;: &quot;Run&quot;,
+    &quot;Python 测试.Python 测试 (test_search.py 内).executor&quot;: &quot;Run&quot;,
+    &quot;Python 测试.test_milvus_lite.test_milvus_lite 的 Python 测试.executor&quot;: &quot;Run&quot;,
+    &quot;Python.front.executor&quot;: &quot;Run&quot;,
+    &quot;Python.prompt_demo.executor&quot;: &quot;Run&quot;,
+    &quot;Python.prompt_server.executor&quot;: &quot;Run&quot;,
+    &quot;Python.qwen3_embedding_demo.executor&quot;: &quot;Run&quot;,
+    &quot;Python.rag_demo.executor&quot;: &quot;Run&quot;,
+    &quot;Python.rag_server.executor&quot;: &quot;Run&quot;,
+    &quot;Python.rag_service.executor&quot;: &quot;Run&quot;,
+    &quot;Python.rag_service_xw.executor&quot;: &quot;Run&quot;,
+    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
+    &quot;git-widget-placeholder&quot;: &quot;feat__webui&quot;,
+    &quot;last_opened_file_path&quot;: &quot;/Users/chenjiamin/python/ALMA&quot;,
+    &quot;node.js.detected.package.eslint&quot;: &quot;true&quot;,
+    &quot;node.js.detected.package.tslint&quot;: &quot;true&quot;,
+    &quot;node.js.selected.package.eslint&quot;: &quot;(autodetect)&quot;,
+    &quot;node.js.selected.package.tslint&quot;: &quot;(autodetect)&quot;,
+    &quot;nodejs_package_manager_path&quot;: &quot;npm&quot;,
+    &quot;settings.editor.selected.configurable&quot;: &quot;editor.preferences.fonts.default&quot;,
+    &quot;vue.rearranger.settings.migration&quot;: &quot;true&quot;
+  },
+  &quot;keyToStringList&quot;: {
+    &quot;DatabaseDriversLRU&quot;: [
+      &quot;mysql&quot;
+    ]
   }
-}]]></component>
+}</component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
       <recent name="$PROJECT_DIR$/http-service/rag_simple_module/data/pdf" />
@@ -243,6 +247,7 @@
       <workItem from="1757685353442" duration="26881000" />
       <workItem from="1760360694887" duration="3826000" />
       <workItem from="1760504965536" duration="597000" />
+      <workItem from="1761444080534" duration="20062000" />
     </task>
     <servers />
   </component>
