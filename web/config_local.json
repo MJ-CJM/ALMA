@@ -1,0 +1,39 @@
+{
+  "database": {
+    "host": "localhost",
+    "port": 3306,
+    "database": "alma_db",
+    "user": "root",
+    "password": "password",
+    "connect_timeout": 30,
+    "autocommit": true
+  },
+  "workflows": [
+    {
+      "id": "workflow_1",
+      "name": "通用助手",
+      "description": "适用于一般性问答和对话",
+      "api_base": "http://ai.wenhan.top:8080",
+      "api_key": "app-bRFPPSnpYCDJGmOifPu5sZ45"
+    },
+    {
+      "id": "workflow_2", 
+      "name": "专业咨询",
+      "description": "提供专业领域的技术咨询",
+      "api_base": "http://ai.wenhan.top:8080",
+      "api_key": "Bearer app-ANOTHER_WORKFLOW_KEY"
+    }
+  ],
+  "file_upload": {
+    "upload_path": "uploads",
+    "max_file_size": 10485760,
+    "allowed_extensions": [".pdf", ".txt", ".doc", ".docx", ".md"]
+  },
+  "conversation": {
+    "retention_days": 30,
+    "max_conversations": 12
+  },
+  "admin": {
+    "password": "admin123456"
+  }
+}
